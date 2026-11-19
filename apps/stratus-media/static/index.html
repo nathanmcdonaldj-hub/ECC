@@ -135,7 +135,7 @@ th{color:var(--gold2);font-size:11px;letter-spacing:.06em;text-transform:upperca
     <span><i class="dot" style="background:var(--bad)"></i>Problem</span>
   </div>
   <div class="floor" id="floor"></div>
-  <p class="muted" style="margin:0">Click any worker to open their station.</p>
+  <p class="muted" style="margin:0">Click any employee to open their station.</p>
 </div>
 <div id="sheetRoot"></div>
 <input type="file" id="filePick" hidden>
@@ -195,16 +195,48 @@ const props={
   book:`<rect x="62" y="54" width="28" height="26" rx="2" fill="${W}"/><rect x="62" y="54" width="5" height="26" fill="${G}"/><path d="M72 62h12M72 67h9" stroke="#9aa6cf" stroke-width="2"/>`,
   mic:`<rect x="74" y="60" width="3" height="20" fill="${W}"/><rect x="70" y="48" width="11" height="15" rx="5.5" fill="${G}"/><path d="M72 52h7M72 56h7" stroke="${N}" stroke-width="1.2"/>`
 };
+let _wid = 0;
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = c => Math.max(0, Math.min(255, Math.round(c + (amt > 0 ? (255 - c) * amt : c * amt))));
+  return "#" + [f(n >> 16), f((n >> 8) & 255), f(n & 255)].map(v => v.toString(16).padStart(2, "0")).join("");
+}
+/* 3D-style employee: shaded head and body, gold metal accents, eye shine, floor shadow. */
 function workerSVG(o, sleep) {
-  const eyes = sleep ? `<path d="M40 40h5M53 40h5" stroke="${N}" stroke-width="2" stroke-linecap="round"/>`
-                     : `<circle cx="42.5" cy="40" r="2.2" fill="${N}"/><circle cx="55.5" cy="40" r="2.2" fill="${N}"/>`;
-  const top = o.hat === "cap" ? `<path d="M31 32a18 16 0 0 1 36 0z" fill="${G}"/><rect x="58" y="29" width="14" height="4" rx="2" fill="${G}"/>`
-    : o.hat === "beret" ? `<ellipse cx="47" cy="25" rx="19" ry="7" fill="${G}"/><circle cx="47" cy="18" r="2.5" fill="${G}"/>`
-    : `<path d="M31 37c0-14 8-20 18-20s18 6 18 20c-4-7-10-9-18-9s-14 2-18 9z" fill="${o.hair}"/>`;
+  const k = "w" + (++_wid);
+  const skinG = `url(#${k}s)`, bodyG = `url(#${k}b)`, goldG = `url(#${k}g)`;
+  const defs = `<defs>
+    <radialGradient id="${k}s" cx="38%" cy="32%" r="70%"><stop offset="0" stop-color="${shade(o.skin, .35)}"/><stop offset=".55" stop-color="${o.skin}"/><stop offset="1" stop-color="${shade(o.skin, -.35)}"/></radialGradient>
+    <linearGradient id="${k}b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${shade(o.shirt, .28)}"/><stop offset=".6" stop-color="${o.shirt}"/><stop offset="1" stop-color="${shade(o.shirt, -.45)}"/></linearGradient>
+    <linearGradient id="${k}g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff1bf"/><stop offset=".45" stop-color="#e3b54a"/><stop offset="1" stop-color="#9a6d16"/></linearGradient>
+    <radialGradient id="${k}h" cx="40%" cy="30%" r="75%"><stop offset="0" stop-color="${shade(o.hair || "#222", .3)}"/><stop offset="1" stop-color="${o.hair || "#222"}"/></radialGradient>
+  </defs>`;
+  const eyes = sleep
+    ? `<path d="M40 41h5M53 41h5" stroke="${N}" stroke-width="2.2" stroke-linecap="round"/>`
+    : `<ellipse cx="42.5" cy="40.5" rx="2.6" ry="3" fill="${N}"/><ellipse cx="55.5" cy="40.5" rx="2.6" ry="3" fill="${N}"/><circle cx="43.4" cy="39.4" r=".9" fill="#fff"/><circle cx="56.4" cy="39.4" r=".9" fill="#fff"/>`;
+  const top = o.hat === "cap"
+    ? `<path d="M30.5 33a18.5 17 0 0 1 37 0z" fill="${goldG}"/><path d="M58 30h15a2 2 0 0 1 0 4H58z" fill="${goldG}"/><path d="M34 27q15-9 30 0" stroke="#fff6d6" stroke-width="1.4" fill="none" opacity=".7"/>`
+    : o.hat === "beret"
+    ? `<ellipse cx="47" cy="25" rx="20" ry="8" fill="${goldG}"/><circle cx="47" cy="17.5" r="2.8" fill="${goldG}"/><ellipse cx="41" cy="22.5" rx="8" ry="2" fill="#fff6d6" opacity=".55"/>`
+    : `<path d="M30.5 38c0-15 8.5-21 18.5-21s18.5 6 18.5 21c-4-7-10.5-9.5-18.5-9.5s-14.5 2.5-18.5 9.5z" fill="url(#${k}h)"/>`;
   const body = o.suit
-    ? `<rect x="28" y="58" width="40" height="44" rx="14" fill="${o.shirt}" stroke="#2a3b7d"/><path d="M40 59L49 80L58 59z" fill="${W}"/><path d="M40 59L46 82M58 59L52 82" stroke="#3a4c94" stroke-width="2.5"/><path d="M46.5 61h5l1.5 3.5-2.5 13-1.5 2-1.5-2-2.5-13z" fill="${G}"/><path d="M33 72l7 0-3.5 4z" fill="${G}"/>`
-    : `<rect x="28" y="58" width="40" height="44" rx="14" fill="${o.shirt}"/><path d="M40 60l8 10 8-10" fill="none" stroke="${G}" stroke-width="2"/>`;
-  return `<svg viewBox="0 0 100 110" aria-hidden="true">${body}<path d="M62 66l10 4" stroke="${o.shirt}" stroke-width="9" stroke-linecap="round"/><circle cx="73" cy="70" r="4.5" fill="${o.skin}"/><path d="M32 68l-4 14" stroke="${o.shirt}" stroke-width="9" stroke-linecap="round"/><circle cx="49" cy="40" r="18" fill="${o.skin}"/>${top}${eyes}<path d="M44 48q5 4 10 0" stroke="${N}" stroke-width="2" fill="none" stroke-linecap="round"/>${props[o.prop] || ""}</svg>`;
+    ? `<rect x="27" y="58" width="42" height="45" rx="15" fill="${bodyG}"/><path d="M40 59L49 80L58 59z" fill="#f4f6ff"/><path d="M40 59L46 83M58 59L52 83" stroke="${shade(o.shirt, .35)}" stroke-width="2.6"/><path d="M46.5 61h5l1.5 3.5-2.5 13-1.5 2-1.5-2-2.5-13z" fill="${goldG}"/><path d="M32.5 72h7.5l-3.7 4.3z" fill="${goldG}"/><circle cx="49" cy="91" r="1.5" fill="${goldG}"/><circle cx="49" cy="97" r="1.5" fill="${goldG}"/>`
+    : `<rect x="27" y="58" width="42" height="45" rx="15" fill="${bodyG}"/><path d="M40 60l8 10 8-10" fill="none" stroke="${goldG}" stroke-width="2.4"/>`;
+  return `<svg viewBox="0 0 100 112" aria-hidden="true">${defs}
+    <ellipse cx="49" cy="106" rx="27" ry="4.5" fill="#000" opacity=".35"/>
+    ${body}
+    <rect x="29" y="60" width="9" height="30" rx="4.5" fill="#fff" opacity=".08"/>
+    <path d="M62 66l10 4" stroke="${bodyG}" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="73" cy="70" r="5" fill="${skinG}"/>
+    <path d="M32 68l-4 14" stroke="${bodyG}" stroke-width="10" stroke-linecap="round"/>
+    <ellipse cx="49" cy="57.5" rx="9" ry="2.6" fill="#000" opacity=".25"/>
+    <circle cx="49" cy="40" r="18.5" fill="${skinG}"/>
+    <circle cx="30.8" cy="42" r="3.4" fill="${shade(o.skin, -.15)}"/><circle cx="67.2" cy="42" r="3.4" fill="${shade(o.skin, -.15)}"/>
+    ${top}${eyes}
+    <ellipse cx="38.5" cy="47" rx="2.6" ry="1.6" fill="#ff8a8a" opacity=".25"/><ellipse cx="59.5" cy="47" rx="2.6" ry="1.6" fill="#ff8a8a" opacity=".25"/>
+    <path d="M44 48.5q5 4.2 10 0" stroke="${N}" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    <g>${(props[o.prop] || "").replaceAll('fill="${G}"', 'fill="' + goldG + '"').replaceAll('fill="#e3b54a"', 'fill="' + goldG + '"')}</g>
+  </svg>`;
 }
 const LOOKS = {
   inbox:{prop:"box",skin:"#c68a5c",shirt:"#2c4cb0",hair:"#2b1a10"},
@@ -280,7 +312,7 @@ function renderSheet(id, soft) {
   const scrollTop = soft ? ($("#sheetRoot .sheet")?.scrollTop || 0) : 0;
   const html = (SHEETS[id] || (() => ""))();
   $("#sheetRoot").innerHTML = `<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-label="${esc(w.name)}">
-    <h2>${id === "settings" ? "⚙" : `<span style="width:40px;display:inline-block">${workerSVG(LOOKS[id], false)}</span>`}${esc(id === "settings" ? "Settings" : w.name)}<button class="btn sm x" data-close>Close</button></h2>
+    <h2>${id === "settings" ? "⚙" : `<span style="width:42px;display:inline-block">${workerSVG(LOOKS[id], false)}</span>`}${esc(id === "settings" ? "Settings" : w.name)}<button class="btn sm x" data-close>Close</button></h2>
     ${w.doing ? `<div class="muted">${esc(w.doing)}</div>` : ""}${html}</div></div>`;
   $("#sheetRoot .sheet").scrollTop = scrollTop;
   (AFTER[id] || (() => {}))();
