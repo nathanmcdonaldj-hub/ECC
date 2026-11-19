@@ -47,7 +47,7 @@ button{cursor:pointer}
 .floor{background:var(--floor);border-radius:20px;padding:16px;display:flex;flex-direction:column;gap:8px}
 .lanehead{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold2);font-weight:800;margin:4px 6px 2px}
 .lane{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.belt{height:10px;border-radius:5px;margin:6px 6px 4px;background:repeating-linear-gradient(90deg,rgba(227,181,74,.55) 0 14px,transparent 14px 26px);background-size:26px 10px;animation:belt 1.4s linear infinite;opacity:.55}
+.belt{height:10px;border-radius:5px;margin:6px 6px 4px;background:repeating-linear-gradient(90deg,rgba(227,181,74,.55) 0 14px,transparent 14px 26px);background-size:26px 10px;opacity:.55}
 @keyframes belt{to{background-position:26px 0}}
 .st{background:var(--card);border-radius:18px;padding:12px 12px 14px;display:flex;flex-direction:column;gap:5px;min-width:0;position:relative;border:1px solid transparent;text-align:left;color:var(--ink)}
 .st:hover{border-color:var(--line)}
@@ -61,16 +61,13 @@ button{cursor:pointer}
 .stage::before{content:"";position:absolute;bottom:2px;left:30%;right:30%;height:12px;border-radius:50%;background:radial-gradient(closest-side,rgba(0,0,0,.45),transparent)}
 .stage img.emp{position:relative;height:182px;width:auto;max-width:100%;object-fit:contain;display:block;transform-origin:50% 100%;transition:transform .25s}
 .st:hover .stage img.emp{transform:scale(1.04)}
-@keyframes alive{0%,100%{transform:translateY(0) scaleY(1) rotate(0)}30%{transform:translateY(-2px) scaleY(1.012) rotate(-.6deg)}70%{transform:translateY(-1px) scaleY(1.006) rotate(.6deg)}}
-.st.off .stage img.emp{filter:grayscale(.75) brightness(.6)}
 .st.error .stage img.emp{filter:sepia(.4) saturate(1.6) hue-rotate(-35deg) brightness(.85)}
-@media (prefers-reduced-motion:reduce){.stage img.emp{animation:none!important}}
 img.face{width:42px;height:42px;border-radius:50%;object-fit:cover;object-position:50% 0%;background:#13215c;border:2px solid var(--gold)}
 .desk{position:absolute;left:8%;right:8%;bottom:0;height:6px;border-radius:3px;background:var(--gold);opacity:.8}
 .status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800}
 .doing{font-size:12px;color:var(--mute)}
 .zzz{position:absolute;right:20%;top:6px;font-weight:800;color:var(--sleep);font-size:13px}
-.st.ok svg{animation:bob 1.6s ease-in-out infinite}
+
 @keyframes bob{50%{transform:translateY(-3px)}}
 .badge{position:absolute;top:-9px;right:10px;background:var(--gold);color:var(--navy);font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px}
 .st.error .badge{background:var(--bad)}
@@ -155,7 +152,6 @@ body.demo .st.done{opacity:.75}
   <div class="bar">
     <span class="sh">SH</span>
     <h1 id="hello">Stratus House Media<small id="sub">Loading…</small></h1>
-    <button class="pill" id="motionBtn">✨ Motion on</button>
     <button class="pill" id="demoBtn">▶ Demo</button>
     <button class="pill" id="settingsBtn">⚙ Settings</button>
     <button class="pill g" id="talkBtn">🎙 Talk to manager</button>
@@ -286,33 +282,12 @@ const LOOKS = {
   sales:{prop:"book",skin:"#a86f48",shirt:"#2c4cb0",hair:"#111"},
   manager:{prop:"mic",skin:"#c68a5c",shirt:"#050d33",hair:"#2b1a10",suit:true}
 };
-/* 3D employee portraits (made in Higgsfield). On-shift employees play a small looping
-   animated picture (.webp) of their job; off-shift ones show a still (.png). Loops pause
-   whenever the tab is hidden. Falls back to the still, then the drawn version. */
+/* 3D employee portraits (made in Higgsfield), shown as still, full-colour cut-outs.
+   Falls back to the drawn version if a picture is missing. */
 const EMP_IMG = id => `/static/employees/${id}.png`;
-const EMP_ANIM = id => `/static/employees/${id}.webp`;
-/* Keep it light: only employees who are working (or waiting on you) move, only while
-   this window is in front and in use, and never when Motion is switched off. */
-const MOTION_OK = !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
-let motionOn = (() => { try { return localStorage.getItem("motion") !== "off"; } catch (e) { return true; } })();
-const pageActive = () => !document.hidden && document.hasFocus();
-const wantsAnim = status => MOTION_OK && motionOn && (status === "ok" || status === "you");
-function empImg(id, sleep, status) {
-  const anim = wantsAnim(status);
-  const src = anim && pageActive() ? EMP_ANIM(id) : EMP_IMG(id);
-  return `<img class="emp${anim ? " anim" : ""}" data-id="${id}" src="${src}" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.classList.remove('anim');this.src=EMP_IMG('${id}')}else{this.outerHTML=workerSVG(LOOKS['${id}'], ${sleep})}">`;
+function empImg(id, sleep) {
+  return `<img class="emp" src="${EMP_IMG(id)}" alt="" onerror="this.outerHTML=workerSVG(LOOKS['${id}'], ${sleep})">`;
 }
-function syncMotion() {
-  const on = pageActive();
-  document.querySelectorAll("img.emp.anim").forEach(im => {
-    const want = on ? EMP_ANIM(im.dataset.id) : EMP_IMG(im.dataset.id);
-    if (!im.src.endsWith(want)) im.src = want;
-  });
-}
-document.addEventListener("visibilitychange", syncMotion);
-window.addEventListener("blur", syncMotion);
-window.addEventListener("focus", syncMotion);
-function motionLabel() { const b = $("#motionBtn"); if (b) b.textContent = motionOn ? "✨ Motion on" : "✨ Motion off"; }
 function faceImg(id) {
   return `<img class="face" src="${EMP_IMG(id)}" alt="" onerror="this.outerHTML='<span style=&quot;width:42px;display:inline-block&quot;>'+workerSVG(LOOKS['${id}'], false)+'</span>'">`;
 }
@@ -351,7 +326,7 @@ function render() {
       return `<button class="st ${w.status}" data-open="${id}">
         ${badge ? `<span class="badge">${badge}</span>` : ""}
         <div class="sign"><b>${esc(w.name)}</b><span class="num">#${num}</span></div>
-        <div class="stage">${empImg(id, w.status === "off", w.status)}${w.status === "off" ? '<span class="zzz">z z</span>' : ""}</div>
+        <div class="stage">${empImg(id, w.status === "off")}${w.status === "off" ? '<span class="zzz">z z</span>' : ""}</div>
         <span class="status"><i class="dot" style="background:${c}"></i>${label}</span>
         <span class="doing">${esc(w.doing)}</span></button>`;
     }).join("")}</div>
@@ -664,11 +639,6 @@ document.addEventListener("click", async e => {
   if (t.hasAttribute("data-scrim") && e.target === t) return closeSheet();
   const d = t.dataset;
   if (t.id === "demoBtn") return demoStart();
-  if (t.id === "motionBtn") {
-    motionOn = !motionOn;
-    try { localStorage.setItem("motion", motionOn ? "on" : "off"); } catch (e) {}
-    motionLabel(); lastFloor = ""; return render();
-  }
   if (demo) {
     if (d.demo === "exit") return demoExit();
     if (d.demo === "next") { demo.i++; return demoShow(); }
@@ -724,7 +694,6 @@ async function copyText(s) {
 }
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 
-motionLabel();
 refresh();
 setInterval(() => { if (!busy && !document.hidden) refresh(); }, 15000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) refresh(); });
