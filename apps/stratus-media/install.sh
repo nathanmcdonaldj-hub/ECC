@@ -23,7 +23,7 @@ mkdir -p "$DEST/static/employees" "$DEST/bin" "$HOME/Library/LaunchAgents" \
 if [ "$SRC" != "$DEST" ]; then
   cp "$SRC/server.py" "$DEST/server.py"
   cp "$SRC/static/index.html" "$DEST/static/index.html"
-  cp "$SRC"/static/employees/*.jpg "$DEST/static/employees/" 2>/dev/null || true
+  cp "$SRC"/static/employees/* "$DEST/static/employees/" 2>/dev/null || true
   cp "$SRC/install.sh" "$DEST/install.sh"
 fi
 chmod +x "$DEST/install.sh"
