@@ -11,11 +11,12 @@
   --navy:#030b2e; --floor:#0a1747; --card:#13215c; --card2:#1a2a6c; --line:#2a3b7d;
   --gold:#e3b54a; --gold2:#f6dc8a; --ink:#eef1fb; --mute:#9aa6cf;
   --ok:#3ecf8e; --sleep:#7a86b3; --bad:#ff6b6b; --tt:#ff5c8a;
-  --sans:"Manrope","Avenir Next","Helvetica Neue",system-ui,sans-serif;
+  --sans:"Bricolage Grotesque","Manrope","Avenir Next","Helvetica Neue",system-ui,sans-serif;
   --serif:"Cinzel","Trajan Pro",Georgia,serif;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
+@font-face{font-family:"Bricolage Grotesque";src:local("Bricolage Grotesque"),url(/static/bricolage.woff2) format("woff2");font-weight:200 800;font-display:swap}
 html,body{margin:0;background:var(--navy);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
 button,input,textarea,select{font:inherit;color:inherit}
 button{cursor:pointer}
@@ -55,13 +56,18 @@ button{cursor:pointer}
 .sign{display:flex;justify-content:space-between;align-items:center;gap:6px}
 .sign b{font-size:13px;font-weight:800}
 .num{font-size:11px;color:var(--mute);font-weight:800}
-.stage{height:112px;display:flex;align-items:flex-end;justify-content:center;position:relative}
+.stage{height:170px;display:flex;align-items:flex-end;justify-content:center;position:relative;border-radius:14px;overflow:hidden;background:#13215c}
 .stage svg{height:106px;width:auto;max-width:100%}
+.stage img.emp{width:100%;height:100%;object-fit:cover;object-position:50% 22%;display:block;transition:transform .25s}
+.st:hover .stage img.emp{transform:scale(1.04)}
+.st.off .stage img.emp{filter:grayscale(.75) brightness(.6)}
+.st.error .stage img.emp{filter:sepia(.4) saturate(1.6) hue-rotate(-35deg) brightness(.85)}
+img.face{width:42px;height:42px;border-radius:50%;object-fit:cover;object-position:50% 8%;background:#13215c;border:2px solid var(--gold)}
 .desk{position:absolute;left:8%;right:8%;bottom:0;height:6px;border-radius:3px;background:var(--gold);opacity:.8}
 .status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800}
 .doing{font-size:12px;color:var(--mute)}
 .zzz{position:absolute;right:20%;top:6px;font-weight:800;color:var(--sleep);font-size:13px}
-.st.ok svg{animation:bob 1.2s ease-in-out infinite}
+.st.ok svg{animation:bob 1.6s ease-in-out infinite}
 @keyframes bob{50%{transform:translateY(-3px)}}
 .badge{position:absolute;top:-9px;right:10px;background:var(--gold);color:var(--navy);font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px}
 .st.error .badge{background:var(--bad)}
@@ -251,6 +257,14 @@ const LOOKS = {
   sales:{prop:"book",skin:"#a86f48",shirt:"#2c4cb0",hair:"#111"},
   manager:{prop:"mic",skin:"#c68a5c",shirt:"#050d33",hair:"#2b1a10",suit:true}
 };
+/* 3D employee portraits (made in Higgsfield). Falls back to the drawn version if a picture is missing. */
+const EMP_IMG = id => `/static/employees/${id}.jpg`;
+function empImg(id, sleep) {
+  return `<img class="emp" src="${EMP_IMG(id)}" alt="" loading="lazy" onerror="this.outerHTML=workerSVG(LOOKS['${id}'], ${sleep})">`;
+}
+function faceImg(id) {
+  return `<img class="face" src="${EMP_IMG(id)}" alt="" onerror="this.outerHTML='<span style=&quot;width:42px;display:inline-block&quot;>'+workerSVG(LOOKS['${id}'], false)+'</span>'">`;
+}
 const LANES = [["Clip line",["inbox","clipper","captions","desk"]],["Posting + results",["courier","tiktok","analyst","scout"]],["Books + UGC",["ugc","sales","manager"]]];
 const STATUS = {ok:["var(--ok)","Working"],you:["var(--gold)","Waiting on you"],idle:["var(--sleep)","Quiet"],off:["var(--sleep)","Off shift"],error:["var(--bad)","Problem"]};
 
@@ -285,7 +299,7 @@ function render() {
       return `<button class="st ${w.status}" data-open="${id}">
         ${badge ? `<span class="badge">${badge}</span>` : ""}
         <div class="sign"><b>${esc(w.name)}</b><span class="num">#${num}</span></div>
-        <div class="stage">${workerSVG(LOOKS[id], w.status === "off")}<i class="desk"></i>${w.status === "off" ? '<span class="zzz">z z</span>' : ""}</div>
+        <div class="stage">${empImg(id, w.status === "off")}<i class="desk"></i>${w.status === "off" ? '<span class="zzz">z z</span>' : ""}</div>
         <span class="status"><i class="dot" style="background:${c}"></i>${label}</span>
         <span class="doing">${esc(w.doing)}</span></button>`;
     }).join("")}</div>
@@ -312,7 +326,7 @@ function renderSheet(id, soft) {
   const scrollTop = soft ? ($("#sheetRoot .sheet")?.scrollTop || 0) : 0;
   const html = (SHEETS[id] || (() => ""))();
   $("#sheetRoot").innerHTML = `<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-label="${esc(w.name)}">
-    <h2>${id === "settings" ? "⚙" : `<span style="width:42px;display:inline-block">${workerSVG(LOOKS[id], false)}</span>`}${esc(id === "settings" ? "Settings" : w.name)}<button class="btn sm x" data-close>Close</button></h2>
+    <h2>${id === "settings" ? "⚙" : `${faceImg(id)}`}${esc(id === "settings" ? "Settings" : w.name)}<button class="btn sm x" data-close>Close</button></h2>
     ${w.doing ? `<div class="muted">${esc(w.doing)}</div>` : ""}${html}</div></div>`;
   $("#sheetRoot .sheet").scrollTop = scrollTop;
   (AFTER[id] || (() => {}))();

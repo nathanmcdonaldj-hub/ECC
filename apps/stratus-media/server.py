@@ -1474,6 +1474,9 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(url.query)
         if url.path in ("/", "/index.html"):
             return self.send_file(os.path.join(STATIC_DIR, "index.html"), "text/html; charset=utf-8")
+        if url.path.startswith("/static/employees/"):
+            name = os.path.basename(url.path)
+            return self.send_file(os.path.join(STATIC_DIR, "employees", name))
         if url.path.startswith("/static/"):
             name = os.path.basename(url.path)
             return self.send_file(os.path.join(STATIC_DIR, name))
