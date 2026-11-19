@@ -271,7 +271,14 @@ def list_inbox():
         for base in (inbox, os.path.join(CONFIG["openshorts_dir"], "autopilot")):
             try:
                 with open(os.path.join(base, name), encoding="utf-8") as fh:
-                    processed.update(l.strip() for l in fh if l.strip())
+                    for l in fh:
+                        l = l.strip()
+                        if not l:
+                            continue
+                        processed.add(l)
+                        # Autopilot format: "name|size" for files, "link|url" for links.
+                        head, _, tail = l.partition("|")
+                        processed.add(tail if head == "link" else head)
             except OSError:
                 pass
     items = []
@@ -594,8 +601,10 @@ def find_platform_failures(result, platforms):
     if isinstance(res, dict):
         for p in platforms:
             r = res.get(p)
-            if isinstance(r, dict) and r.get("success") is False:
-                failed[p] = str(r.get("error") or r.get("message") or "unknown error")[:160]
+            if isinstance(r, dict) and (r.get("success") is False or r.get("skipped")
+                                        or str(r.get("status", "")).lower() == "skipped"):
+                failed[p] = str(r.get("error") or r.get("message") or r.get("reason")
+                                or "it was skipped, usually because the account isn't connected")[:160]
     return failed
 
 
