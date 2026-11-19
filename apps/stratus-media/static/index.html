@@ -61,7 +61,8 @@ button{cursor:pointer}
 .stage::before{content:"";position:absolute;bottom:2px;left:30%;right:30%;height:12px;border-radius:50%;background:radial-gradient(closest-side,rgba(0,0,0,.45),transparent)}
 .stage img.emp{position:relative;height:182px;width:auto;max-width:100%;object-fit:contain;display:block;transform-origin:50% 100%;filter:drop-shadow(0 6px 10px rgba(0,0,0,.35));transition:transform .25s}
 .st:hover .stage img.emp{transform:scale(1.04)}
-.st.ok .stage img.emp,.st.you .stage img.emp,.st.idle .stage img.emp{animation:alive 3.2s ease-in-out infinite}
+.stage img.emp:not(.anim){animation:none}
+.st.ok .stage img.emp:not(.anim),.st.you .stage img.emp:not(.anim),.st.idle .stage img.emp:not(.anim){animation:alive 3.2s ease-in-out infinite}
 @keyframes alive{0%,100%{transform:translateY(0) scaleY(1) rotate(0)}30%{transform:translateY(-2px) scaleY(1.012) rotate(-.6deg)}70%{transform:translateY(-1px) scaleY(1.006) rotate(.6deg)}}
 .st.off .stage img.emp{filter:grayscale(.75) brightness(.6) drop-shadow(0 6px 10px rgba(0,0,0,.35))}
 .st.error .stage img.emp{filter:sepia(.4) saturate(1.6) hue-rotate(-35deg) brightness(.85)}
@@ -126,6 +127,29 @@ th{color:var(--gold2);font-size:11px;letter-spacing:.06em;text-transform:upperca
 .seg button.on{background:var(--gold);color:var(--navy)}
 @media (max-width:900px){.lane{grid-template-columns:repeat(2,minmax(0,1fr))}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:520px){.clipcard{grid-template-columns:minmax(0,1fr)}.clipcard video{width:100%}}
+
+/* ---------- demo mode ---------- */
+.demoflag{position:fixed;top:0;left:0;right:0;z-index:30;background:var(--gold);color:var(--navy);text-align:center;font-weight:800;font-size:13px;padding:6px 12px}
+body.demo .wrap{padding-top:34px;padding-bottom:230px}
+body.demo .st{opacity:.38;transition:opacity .3s,transform .3s,box-shadow .3s}
+body.demo .st.spot{opacity:1;transform:translateY(-4px);border-color:var(--gold);box-shadow:0 0 0 3px rgba(227,181,74,.35),0 14px 30px rgba(0,0,0,.45)}
+body.demo .st.done{opacity:.75}
+.demobox{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:31;width:min(760px,calc(100vw - 32px));background:var(--card2);border:1px solid var(--gold);border-radius:20px;padding:14px 16px;display:grid;grid-template-columns:64px minmax(0,1fr);gap:12px;box-shadow:0 20px 50px rgba(0,0,0,.55)}
+.demobox img{width:64px;height:64px;border-radius:50%;object-fit:cover;object-position:50% 0;background:var(--navy);border:2px solid var(--gold)}
+.demobox .step{font-size:11px;font-weight:800;color:var(--gold);letter-spacing:.08em;text-transform:uppercase}
+.demobox h3{margin:2px 0 4px;font-size:18px}
+.demobox p{margin:0 0 8px;color:var(--ink)}
+.demobox .ex{background:var(--navy);border-radius:12px;padding:8px 10px;font-size:13px;margin-bottom:10px}
+.demobox .ex b{color:var(--gold)}
+.demobox .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.demobox .dots{display:flex;gap:4px;margin-right:auto}
+.demobox .dots i{width:7px;height:7px;border-radius:50%;background:var(--line)}
+.demobox .dots i.on{background:var(--gold)}
+.demobox .bar2{grid-column:1/-1;height:3px;border-radius:2px;background:var(--line);overflow:hidden}
+.demobox .bar2 i{display:block;height:100%;background:var(--gold);width:0}
+.demobox.play .bar2 i{animation:dfill linear forwards}
+@keyframes dfill{to{width:100%}}
+@media (max-width:560px){.demobox{grid-template-columns:1fr}.demobox img{display:none}}
 </style>
 </head>
 <body>
@@ -133,6 +157,7 @@ th{color:var(--gold2);font-size:11px;letter-spacing:.06em;text-transform:upperca
   <div class="bar">
     <span class="sh">SH</span>
     <h1 id="hello">Stratus House Media<small id="sub">Loading…</small></h1>
+    <button class="pill" id="demoBtn">▶ Demo</button>
     <button class="pill" id="settingsBtn">⚙ Settings</button>
     <button class="pill g" id="talkBtn">🎙 Talk to manager</button>
   </div>
@@ -147,6 +172,7 @@ th{color:var(--gold2);font-size:11px;letter-spacing:.06em;text-transform:upperca
   <div class="floor" id="floor"></div>
   <p class="muted" style="margin:0">Click any employee to open their station.</p>
 </div>
+<div id="demoRoot"></div>
 <div id="sheetRoot"></div>
 <input type="file" id="filePick" hidden>
 
@@ -261,11 +287,22 @@ const LOOKS = {
   sales:{prop:"book",skin:"#a86f48",shirt:"#2c4cb0",hair:"#111"},
   manager:{prop:"mic",skin:"#c68a5c",shirt:"#050d33",hair:"#2b1a10",suit:true}
 };
-/* 3D employee portraits (made in Higgsfield). Falls back to the drawn version if a picture is missing. */
+/* 3D employee portraits (made in Higgsfield). On-shift employees play a small looping
+   animated picture (.webp) of their job; off-shift ones show a still (.png). Loops pause
+   whenever the tab is hidden. Falls back to the still, then the drawn version. */
 const EMP_IMG = id => `/static/employees/${id}.png`;
-function empImg(id, sleep) {
-  return `<img class="emp" src="${EMP_IMG(id)}" alt="" loading="lazy" onerror="this.outerHTML=workerSVG(LOOKS['${id}'], ${sleep})">`;
+const EMP_ANIM = id => `/static/employees/${id}.webp`;
+const MOTION_OK = !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+function empImg(id, sleep, status) {
+  const anim = MOTION_OK && !sleep && status !== "error";
+  const src = anim && !document.hidden ? EMP_ANIM(id) : EMP_IMG(id);
+  return `<img class="emp${anim ? " anim" : ""}" data-id="${id}" src="${src}" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.classList.remove('anim');this.src=EMP_IMG('${id}')}else{this.outerHTML=workerSVG(LOOKS['${id}'], ${sleep})}">`;
 }
+document.addEventListener("visibilitychange", () => {
+  document.querySelectorAll("img.emp.anim").forEach(im => {
+    im.src = document.hidden ? EMP_IMG(im.dataset.id) : EMP_ANIM(im.dataset.id);
+  });
+});
 function faceImg(id) {
   return `<img class="face" src="${EMP_IMG(id)}" alt="" onerror="this.outerHTML='<span style=&quot;width:42px;display:inline-block&quot;>'+workerSVG(LOOKS['${id}'], false)+'</span>'">`;
 }
@@ -273,6 +310,7 @@ const LANES = [["Clip line",["inbox","clipper","captions","desk"]],["Posting + r
 const STATUS = {ok:["var(--ok)","Working"],you:["var(--gold)","Waiting on you"],idle:["var(--sleep)","Quiet"],off:["var(--sleep)","Off shift"],error:["var(--bad)","Problem"]};
 
 /* ---------- render ---------- */
+let lastFloor = "";
 function render() {
   const h = new Date().getHours();
   const greet = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
@@ -294,7 +332,7 @@ function render() {
     <button class="kpi" data-open="courier"><div class="v">${S.posts_used} / ${S.posts_limit}</div><div class="k">Free posts this month</div></button>
     <button class="kpi" data-open="sales"><div class="v">${S.sales.imported_at ? "$" + S.sales.royalty.toLocaleString(undefined,{minimumFractionDigits:2}) : "–"}</div><div class="k">Book royalties (last report)</div></button>`;
   const W = Object.fromEntries(S.workers.map(w => [w.id, w]));
-  $("#floor").innerHTML = LANES.map(([title, ids], i) => `
+  const floorHTML = LANES.map(([title, ids], i) => `
     <div class="lanehead">${title}</div>
     <div class="lane">${ids.map((id, n) => {
       const w = W[id]; const [c, label] = STATUS[w.status] || STATUS.idle;
@@ -303,16 +341,18 @@ function render() {
       return `<button class="st ${w.status}" data-open="${id}">
         ${badge ? `<span class="badge">${badge}</span>` : ""}
         <div class="sign"><b>${esc(w.name)}</b><span class="num">#${num}</span></div>
-        <div class="stage">${empImg(id, w.status === "off")}${w.status === "off" ? '<span class="zzz">z z</span>' : ""}</div>
+        <div class="stage">${empImg(id, w.status === "off", w.status)}${w.status === "off" ? '<span class="zzz">z z</span>' : ""}</div>
         <span class="status"><i class="dot" style="background:${c}"></i>${label}</span>
         <span class="doing">${esc(w.doing)}</span></button>`;
     }).join("")}</div>
     ${i < LANES.length - 1 ? '<div class="belt" aria-hidden="true"></div>' : ""}`).join("");
+  if (floorHTML !== lastFloor) { $("#floor").innerHTML = floorHTML; lastFloor = floorHTML; }
 }
 
 async function refresh() {
+  if (demo) return;
   try {
-    const r = await fetch("/api/state"); S = await r.json();
+    const r = await fetch("/api/state"); const ns = await r.json(); if (demo) return; S = ns;
   } catch (e) {
     $("#errs").innerHTML = `<div class="err"><span class="ic">!</span><div class="body"><b>Dashboard: can't reach the dashboard service</b><span class="what">What went wrong: the small helper program on your Mac stopped answering.</span><br><span class="fix">What to do: restart your Mac, or ask Claude in your project chat.</span></div></div>`;
     return;
@@ -505,12 +545,124 @@ function toggleMic() {
   rec.start();
 }
 
+
+/* ---------- demo mode: walks through every employee with made-up sample data.
+   It never calls the server, posts nothing and spends no credits. ---------- */
+const DEMO_STEPS = [
+  ["inbox", "Picks up every video you drop in or link you paste, and lines it up for tonight.",
+   "New video in: <b>“Sample: 12-minute business talk”</b> (link pasted 9:41 PM)", "Got 1 new video"],
+  ["clipper", "Works overnight (10 PM to 6 AM). Finds the best moments and cuts them into vertical clips under 60 seconds.",
+   "Made <b>3 clips</b>: 0:42–1:31 (49s) · 4:10–4:58 (48s) · 8:02–8:55 (53s)", "Cutting clip 3 of 3"],
+  ["captions", "Writes a hook, a caption and 3–5 hashtags for each clip, with no typos.",
+   "<b>“Nobody tells you this about your first $10k…”</b> #business #success #mindset", "Writing captions"],
+  ["desk", "Your desk. Nothing posts until you press Approve. You pick the platform and time.",
+   "Clip 1 <b>approved</b> for Instagram + YouTube · Friday 6:30 PM", "1 clip waiting on you"],
+  ["courier", "Posts your approved clips at the time you picked, through Upload-Post.",
+   "Clip 1 <b>posted</b> to Instagram + YouTube (demo only, nothing really posted)", "Posting clip 1"],
+  ["tiktok", "TikTok can't be posted automatically on the free plan, so this employee hands you the clip and copies the caption for you.",
+   "Caption <b>copied</b>. Open TikTok, add the clip, paste.", "Clip 1 ready for TikTok"],
+  ["analyst", "Checks your views every 6 hours and tracks how close you are to getting paid.",
+   "Clip 1: <b>1,240 views</b> · 38 likes · 6 shares", "Counting views"],
+  ["scout", "Every Monday at 5:41 AM, sends trending video ideas for your niches.",
+   "Trending: <b>“morning routine”</b> clips up 40% in fitness this week", "Scanning trends"],
+  ["ugc", "Turns your coloring books into promo video ideas you can make in Higgsfield.",
+   "Brief: <b>mom and kid coloring the bunny page</b> · 9:16 · 15 seconds", "Writing a video brief"],
+  ["sales", "Reads your weekly Amazon KDP report and shows your book sales.",
+   "This week: <b>14 books sold</b> · $38.20 in royalties", "Reading KDP report"],
+  ["manager", "Your Social Media Manager. Talk or type to him. He runs the team, gives you straight numbers and always asks before anything posts.",
+   "<b>“Mr. McDonald, clip 1 did 1,240 views. I'd post clip 2 Friday 6:30 PM. OK?”</b>", "Talking to you"],
+];
+const DEMO_MS = 6500;
+let demo = null;   // {i, play, timer, real}
+function demoState(i) {
+  const fake = JSON.parse(JSON.stringify(demo.real));
+  fake.errors = [];
+  const reached = id => DEMO_STEPS.findIndex(x => x[0] === id) <= i;
+  fake.clips_waiting = i >= 3 && i < 4 ? [{}] : [];
+  fake.stats = Object.assign({}, fake.stats, {views: reached("analyst") ? 1240 : null});
+  fake.posts_used = reached("courier") ? 1 : 0;
+  fake.posts_limit = fake.posts_limit || 10;
+  fake.sales = Object.assign({}, fake.sales, reached("sales") ? {imported_at: "demo", royalty: 38.2} : {imported_at: null});
+  fake.workers = fake.workers.map(w => {
+    const k = DEMO_STEPS.findIndex(x => x[0] === w.id);
+    if (k === i) return Object.assign({}, w, {status: w.id === "desk" ? "you" : "ok", doing: DEMO_STEPS[k][3], count: 1});
+    if (k < i) return Object.assign({}, w, {status: "idle", doing: "Done ✓"});
+    return Object.assign({}, w, {status: "idle", doing: "Up next"});
+  });
+  return fake;
+}
+function demoShow() {
+  const i = demo.i;
+  if (i >= DEMO_STEPS.length) {
+    S = demoState(DEMO_STEPS.length - 1); lastFloor = ""; render();
+    document.querySelectorAll(".st").forEach(el => el.classList.remove("spot"));
+    $("#demoRoot").innerHTML = `<div class="demoflag">DEMO · sample data only · nothing is posted · no credits spent</div>
+      <div class="demobox"><img src="${EMP_IMG("manager")}" alt=""><div>
+        <div class="step">Demo finished</div><h3>That's your whole team, Mr. McDonald</h3>
+        <p>Nothing was posted and no credits were spent. Press Exit to go back to your real dashboard.</p>
+        <div class="row"><span class="dots"></span><button class="btn" data-demo="replay">↺ Replay</button><button class="btn go" data-demo="exit">Exit demo</button></div></div></div>`;
+    return;
+  }
+  const [id, what, ex] = DEMO_STEPS[i];
+  S = demoState(i); lastFloor = ""; render();
+  const w = S.workers.find(x => x.id === id) || {name: id};
+  document.querySelectorAll(".st").forEach(el => {
+    const k = DEMO_STEPS.findIndex(x => x[0] === el.dataset.open);
+    el.classList.toggle("spot", k === i); el.classList.toggle("done", k < i);
+  });
+  const spot = document.querySelector(`.st[data-open="${id}"]`);
+  if (spot) spot.scrollIntoView({behavior: "smooth", block: "center"});
+  $("#demoRoot").innerHTML = `<div class="demoflag">DEMO · sample data only · nothing is posted · no credits spent</div>
+    <div class="demobox ${demo.play ? "play" : ""}"><img src="${EMP_IMG(id)}" alt=""><div>
+      <div class="step">Step ${i + 1} of ${DEMO_STEPS.length}</div><h3>${esc(w.name)}</h3>
+      <p>${what}</p><div class="ex">${ex}</div>
+      <div class="row"><span class="dots">${DEMO_STEPS.map((_, k) => `<i class="${k <= i ? "on" : ""}"></i>`).join("")}</span>
+        <button class="btn sm" data-demo="back" ${i ? "" : "disabled"}>◀ Back</button>
+        <button class="btn sm" data-demo="play">${demo.play ? "❚❚ Pause" : "▶ Play"}</button>
+        <button class="btn go sm" data-demo="next">Next ▶</button>
+        <button class="btn sm" data-demo="exit">Exit</button></div></div>
+      <div class="bar2"><i style="animation-duration:${DEMO_MS}ms"></i></div></div>`;
+  clearTimeout(demo.timer);
+  if (demo.play) demo.timer = setTimeout(() => { demo.i++; demoShow(); }, DEMO_MS);
+}
+function demoStart() {
+  if (!S) return;
+  closeSheet();
+  demo = {i: 0, play: true, timer: null, real: JSON.parse(JSON.stringify(S))};
+  document.body.classList.add("demo");
+  window.scrollTo({top: 0});
+  demoShow();
+}
+function demoExit() {
+  if (!demo) return;
+  clearTimeout(demo.timer);
+  S = demo.real; demo = null;
+  document.body.classList.remove("demo");
+  $("#demoRoot").innerHTML = ""; lastFloor = ""; render(); refresh();
+}
+document.addEventListener("keydown", e => {
+  if (!demo) return;
+  if (e.key === "Escape") demoExit();
+  if (e.key === "ArrowRight") { demo.i++; demoShow(); }
+  if (e.key === "ArrowLeft" && demo.i > 0) { demo.i--; demoShow(); }
+});
+
 /* ---------- clicks ---------- */
 document.addEventListener("click", async e => {
   const t = e.target.closest("button, [data-scrim]");
   if (!t) return;
   if (t.hasAttribute("data-scrim") && e.target === t) return closeSheet();
   const d = t.dataset;
+  if (t.id === "demoBtn") return demoStart();
+  if (demo) {
+    if (d.demo === "exit") return demoExit();
+    if (d.demo === "next") { demo.i++; return demoShow(); }
+    if (d.demo === "back") { demo.i = Math.max(0, demo.i - 1); return demoShow(); }
+    if (d.demo === "play") { demo.play = !demo.play; return demoShow(); }
+    if (d.demo === "replay") { demo.i = 0; demo.play = true; return demoShow(); }
+    if (d.open) { const k = DEMO_STEPS.findIndex(x => x[0] === d.open); if (k >= 0) { demo.i = k; demo.play = false; demoShow(); } }
+    return;  // nothing real can be pressed during the demo
+  }
   if (d.open) return openSheet(d.open);
   if (t.hasAttribute("data-close")) return closeSheet();
   if (d.act === "settings" || t.id === "settingsBtn") return openSheet("settings");
@@ -558,7 +710,8 @@ async function copyText(s) {
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 
 refresh();
-setInterval(() => { if (!busy) refresh(); }, 15000);
+setInterval(() => { if (!busy && !document.hidden) refresh(); }, 15000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) refresh(); });
 </script>
 </body>
 </html>
