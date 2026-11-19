@@ -28,6 +28,17 @@ button{cursor:pointer}
   -webkit-mask-composite:source-in;mask-image:linear-gradient(to right,transparent,#000 9%,#000 91%,transparent),linear-gradient(to bottom,transparent,#000 14%,#000 66%,transparent);mask-composite:intersect}
 .bar{position:relative;display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;padding:14px 10px 0}
 .bar .pill{box-shadow:0 4px 14px rgba(0,0,0,.35)}
+.gatebox{display:flex;flex-direction:column;align-items:center;gap:3px;margin-right:auto}
+.gate{border:0;border-radius:999px;padding:10px 22px;font-weight:900;font-size:15px;letter-spacing:.08em;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.4);display:inline-flex;align-items:center;gap:8px}
+.gate::before{content:"";width:10px;height:10px;border-radius:50%;background:currentColor}
+.gate.open{background:var(--ok);color:#062b1c}
+.gate.closed{background:#3a2440;color:#ff9b9b;border:1px solid var(--bad)}
+.gatebox small{font-size:11px;color:var(--ink);font-weight:700;text-shadow:0 1px 6px rgba(0,0,0,.8);white-space:nowrap}
+.modal{position:fixed;inset:0;z-index:50;background:rgba(2,6,24,.7);display:grid;place-items:center;padding:16px}
+.modal .card{background:var(--card2);border:1px solid var(--gold);border-radius:20px;padding:20px;max-width:440px;display:flex;flex-direction:column;gap:12px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.modal h3{margin:0;font-size:19px}
+.modal p{margin:0}
+.modal .row{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
 @media (max-width:700px){.hero{height:auto}.hero img{position:relative;display:block;height:130px}.bar{justify-content:center;padding-top:0}}
 .sh{width:44px;height:44px;border-radius:12px;background:var(--gold);color:var(--navy);display:grid;place-items:center;font:700 18px var(--serif)}
 .bar h1{margin:0;font-size:20px;font-weight:800;flex:1 1 240px}
@@ -156,6 +167,7 @@ body.demo .st.done{opacity:.75}
 <body>
 <div class="wrap">
   <div class="hero"><img src="/static/banner.jpg" alt="Stratus House"><div class="bar">
+    <span class="gatebox"><button class="gate" id="gateBtn" title="Open or close clipping">…</button><small id="gateNote"></small></span>
     <button class="pill" id="demoBtn">▶ Demo</button>
     <button class="pill" id="settingsBtn">⚙ Settings</button>
     <button class="pill g" id="talkBtn">🎙 Talk to manager</button>
@@ -186,7 +198,7 @@ let voiceOn = (() => { try { return localStorage.getItem("voice") !== "off"; } c
 async function api(path, body) {
   const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
   let j = {}; try { j = await r.json(); } catch (e) {}
-  if (j.message) toast(j.message);
+  if (j.message && !j.needs_override) toast(j.message);
   await refresh();
   if (openStation) renderSheet(openStation, true);
   return j;
@@ -300,7 +312,25 @@ const STATUS = {ok:["var(--ok)","Working"],you:["var(--gold)","Waiting on you"],
 
 /* ---------- render ---------- */
 let lastFloor = "";
+function renderGate() {
+  const g = S.gate; const b = $("#gateBtn"); if (!g || !b) return;
+  b.className = "gate " + (g.open ? "open" : "closed");
+  b.textContent = g.open ? "OPEN" : "CLOSED";
+  $("#gateNote").textContent = g.open
+    ? (g.running ? "Clipping now" : (g.manual === "open" ? "Override on" : "Clipping open") + (g.closes ? " · closes " + g.closes : ""))
+    : "Closed" + (g.next_open ? " · opens " + g.next_open : "");
+}
+function overrideModal() {
+  const m = document.createElement("div"); m.className = "modal"; m.id = "overrideModal";
+  m.innerHTML = `<div class="card" role="dialog" aria-modal="true">
+    <h3>⚠ It's still trading hours</h3>
+    <p>Clipping normally opens <b>${esc(S.gate.next_open || "2:30 PM")}</b>. Clipping uses a lot of your Mac's memory, which can slow your trading desk.</p>
+    <p>Override and start clipping now?</p>
+    <div class="row"><button class="btn" data-ovr="no">Cancel</button><button class="btn go" data-ovr="yes">Yes, override</button></div></div>`;
+  document.body.appendChild(m);
+}
 function render() {
+  renderGate();
   document.title = (S.clips_waiting.length ? `(${S.clips_waiting.length}) ` : "") + "Stratus House Media";
   $("#errs").innerHTML = S.errors.map(e => `
     <div class="err" role="alert"><span class="ic">!</span>
@@ -368,17 +398,17 @@ const musicSelect = (cur, key) => `<select data-music="${esc(key)}"><option valu
 
 const SHEETS = {
   inbox: () => `
-    <div class="drop" id="vidDrop">Drag a video here, or click to pick one<br><small>Clipped tonight between 10 PM and 6 AM · 10–20 min videos work best</small></div>
+    <div class="drop" id="vidDrop">Drag a video here, or click to pick one<br><small>Clipped weekdays 2:30 PM–6 AM and all weekend · 10–20 min videos work best</small></div>
     <div class="box"><label class="f">Or paste a video link<input type="url" id="linkIn" placeholder="https://…"></label><div><button class="btn go" id="linkGo">Add link</button></div>
       <div class="muted" style="font-size:12px">Only use videos you own or have permission to post.</div></div>
-    <h3>In line for tonight</h3>
+    <h3>In line to clip</h3>
     ${S.inbox.length ? `<table><tr><th>Item</th><th>Type</th></tr>${S.inbox.map(i => `<tr><td style="word-break:break-all">${esc(i.name)}</td><td>${i.kind === "link" ? "Link" : i.size_mb + " MB"}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing in line.</p>`}`,
   clipper: () => `
     <div class="box"><b>Night shift: 10 PM to 6 AM</b><span class="muted">One video at a time, up to 3 clips each. During the day the clipper is fully off, so your trading desk gets the whole Mac.</span></div>
-    <h3>Redo requests for tonight</h3>
+    <h3>Redo requests</h3>
     ${S.redo.length ? S.redo.map(c => `<div class="box"><b>Clip ${c.num} · ${esc(c.source)}</b><span class="muted">“${esc(c.redo?.note)}”</span></div>`).join("") : `<p class="muted">None. To redo a clip, open Your Desk and press Redo, or tell the manager.</p>`}`,
   captions: () => `
-    <div class="box"><span>The Caption Writer drafts a hook line, a call to action, 3–5 hashtags, the platforms and the best time for each new clip, every morning after the night shift.</span>
+    <div class="box"><span>The Caption Writer drafts a hook line, a call to action, 3–5 hashtags, the platforms and the best time for each new clip, after each clipping run.</span>
     <div><button class="btn go" id="capGo">Write captions now</button></div></div>`,
   desk: () => {
     const list = S.clips_waiting;
@@ -535,9 +565,9 @@ function toggleMic() {
 /* ---------- demo mode: walks through every employee with made-up sample data.
    It never calls the server, posts nothing and spends no credits. ---------- */
 const DEMO_STEPS = [
-  ["inbox", "Picks up every video you drop in or link you paste, and lines it up for tonight.",
+  ["inbox", "Picks up every video you drop in or link you paste, and lines it up for the next clipping run.",
    "New video in: <b>“Sample: 12-minute business talk”</b> (link pasted 9:41 PM)", "Got 1 new video"],
-  ["clipper", "Works overnight (10 PM to 6 AM). Finds the best moments and cuts them into vertical clips under 60 seconds.",
+  ["clipper", "Works weekdays from 2:30 PM, when you finish trading, until 6 AM, and all weekend. Finds the best moments and cuts them into vertical clips under 60 seconds.",
    "Made <b>3 clips</b>: 0:42–1:31 (49s) · 4:10–4:58 (48s) · 8:02–8:55 (53s)", "Cutting clip 3 of 3"],
   ["captions", "Writes a hook, a caption and 3–5 hashtags for each clip, with no typos.",
    "<b>“Nobody tells you this about your first $10k…”</b> #business #success #mindset", "Writing captions"],
@@ -639,6 +669,17 @@ document.addEventListener("click", async e => {
   if (!t) return;
   if (t.hasAttribute("data-scrim") && e.target === t) return closeSheet();
   const d = t.dataset;
+  if (d.ovr) {
+    const m = $("#overrideModal"); if (m) m.remove();
+    if (d.ovr === "yes") return api("/api/clip-gate", {action: "open", override: true});
+    return;
+  }
+  if (t.id === "gateBtn" && !demo) {
+    if (S.gate && S.gate.open) return api("/api/clip-gate", {action: "close"});
+    const j = await api("/api/clip-gate", {action: "open"});
+    if (j && j.needs_override) overrideModal();
+    return;
+  }
   if (t.id === "demoBtn") return demoStart();
   if (demo) {
     if (d.demo === "exit") return demoExit();
@@ -671,7 +712,7 @@ document.addEventListener("click", async e => {
   if (d.skip) return api("/api/skip", {id: d.skip});
   if (d.redo) {
     const box = document.createElement("div"); box.className = "box";
-    box.innerHTML = `<label class="f">What should change?<input type="text" placeholder="e.g. make it shorter, start at the punchline"></label><div class="row"><button class="btn go sm">Redo tonight</button></div>`;
+    box.innerHTML = `<label class="f">What should change?<input type="text" placeholder="e.g. make it shorter, start at the punchline"></label><div class="row"><button class="btn go sm">Redo</button></div>`;
     t.closest(".fields").appendChild(box); const inp = $("input", box); inp.focus();
     $("button", box).onclick = () => inp.value.trim() && api("/api/redo", {id: d.redo, note: inp.value.trim()});
     return;

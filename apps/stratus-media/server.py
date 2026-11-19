@@ -47,8 +47,12 @@ DEFAULT_CONFIG = {
     "autopilot_log": os.path.join(HOME, "openshorts", "autopilot.log"),
     "upload_post_profile": "MAIN",
     "upload_post_monthly_limit": 10,
-    "night_start": "22:00",
-    "night_end": "06:00",
+    # Clipping hours: weekdays from market close until morning, weekends all day.
+    "clip_weekday_open": "14:30",
+    "clip_close": "06:00",
+    "clip_weekends_all_day": True,
+    "night_run": os.path.join(HOME, "openshorts", "autopilot", "night_run.sh"),
+    "morning_stop": os.path.join(HOME, "openshorts", "autopilot", "morning_stop.sh"),
     "trend_brief": "Mon 5:41 AM",
     "ffmpeg": "",
     "default_model": "claude-opus-5-5",
@@ -239,13 +243,55 @@ def parse_hhmm(s):
     return int(h), int(m)
 
 
-def in_night_window(dt=None):
+def in_clip_window(dt=None):
+    """Weekdays from market close (2:30 PM) to 6 AM; Saturday and Sunday all day."""
     dt = dt or now()
-    sh, sm = parse_hhmm(CONFIG["night_start"])
-    eh, em = parse_hhmm(CONFIG["night_end"])
+    if CONFIG.get("clip_weekends_all_day", True) and dt.weekday() >= 5:
+        return True
+    oh, om = parse_hhmm(CONFIG["clip_weekday_open"])
+    ch, cm = parse_hhmm(CONFIG["clip_close"])
     t = dt.hour * 60 + dt.minute
-    start, end = sh * 60 + sm, eh * 60 + em
-    return t >= start or t < end if start > end else start <= t < end
+    return t >= oh * 60 + om or t < ch * 60 + cm
+
+
+def _next_flip(dt, want):
+    """First moment after dt (15-minute steps, up to 9 days) when the window is `want`."""
+    t = dt.replace(second=0, microsecond=0)
+    t += timedelta(minutes=15 - t.minute % 15)
+    for _ in range(9 * 96):
+        if in_clip_window(t) == want:
+            return t
+        t += timedelta(minutes=15)
+    return None
+
+
+def next_window_open(dt=None):
+    """Next time the schedule opens, skipping the window we may be in right now."""
+    dt = dt or now()
+    if in_clip_window(dt):
+        end = _next_flip(dt, False)
+        return _next_flip(end, True) if end else None
+    return _next_flip(dt, True)
+
+
+def gate():
+    """Clipping gate: the schedule, unless Mr. McDonald pressed Open (override) or Close."""
+    g = STATE.setdefault("clip_gate", {"manual": None, "until": None})
+    if g.get("manual") and g.get("until") and now_iso() >= g["until"]:
+        g["manual"], g["until"] = None, None
+    if g.get("manual") == "open":
+        return True
+    if g.get("manual") == "closed":
+        return False
+    return in_clip_window()
+
+
+def nice_dt(dt):
+    if not dt:
+        return ""
+    day = "today" if dt.date() == now().date() else (
+        "tomorrow" if dt.date() == (now() + timedelta(days=1)).date() else dt.strftime("%A"))
+    return "{} {}".format(dt.strftime("%I:%M %p").lstrip("0"), day)
 
 
 def nice_time(iso):
@@ -825,7 +871,7 @@ How you talk: short, blunt, numbers first, plain words, no jargon, no recaps. Co
 questions first. When there are options give at most 3 and mark your pick. Never show \
 passwords or keys. If you were wrong, say "I was wrong" plainly.
 
-What you run: clips are made overnight (10 PM–6 AM, 3 max) from his Clip Inbox; you and the \
+What you run: clips are made from his Clip Inbox on weekdays from 2:30 PM (after he finishes trading) to 6 AM and all day on weekends, 3 clips per video max (he can press Open/Close on the dashboard); you and the \
 Caption Writer prepare caption (hook, call to action, 3–5 hashtags), platform and time; he \
 approves on Your Desk; the Courier posts to Instagram + YouTube through Upload-Post (free \
 plan: 10 posts a month); TikTok he posts by hand. He also sells coloring books on Amazon KDP \
@@ -865,13 +911,13 @@ MANAGER_TOOLS = [
     },
     {
         "name": "queue_video_link",
-        "description": "Add a video link to the Clip Inbox for tonight's clipping.",
+        "description": "Add a video link to the Clip Inbox for the next clipping run.",
         "input_schema": {"type": "object", "properties": {"url": {"type": "string"}},
                          "required": ["url"], "additionalProperties": False},
     },
     {
         "name": "request_redo",
-        "description": "Ask the Clipper to redo a clip tonight with his note (e.g. 'make it shorter', 'start at the punchline').",
+        "description": "Ask the Clipper to redo a clip on the next run with his note (e.g. 'make it shorter', 'start at the punchline').",
         "input_schema": {"type": "object", "properties": {"clip_id": {"type": "string"}, "note": {"type": "string"}},
                          "required": ["clip_id", "note"], "additionalProperties": False},
     },
@@ -1059,7 +1105,7 @@ def run_manager_tool(name, args):
             if not rec:
                 return "No clip with that id.", None
             write_redo(rec, args.get("note", ""))
-            return "Redo queued for tonight.", None
+            return "Redo queued for the next clipping run.", None
     return "Unknown tool.", None
 
 
@@ -1143,7 +1189,7 @@ def add_link(url):
                     "Writing to Movies → Clip Inbox failed ({}).".format(exc),
                     "Ask Claude in your project chat to check the Clip Inbox folder.", key="inbox:write")
         return False, "Couldn't save it."
-    return True, "Queued for tonight's clipping."
+    return True, "Queued for the next clipping run."
 
 
 def write_redo(rec, note):
@@ -1212,12 +1258,9 @@ def build_state(for_model=False):
     def st(name, default):
         return "error" if name in err_workers else default
 
-    night = in_night_window()
-    log_recent = False
-    try:
-        log_recent = time.time() - os.path.getmtime(CONFIG["autopilot_log"]) < 600
-    except OSError:
-        pass
+    gate_open = gate()
+    running = clipper_running()
+    nxt = next_window_open()
     next_post = scheduled[0] if scheduled else None
     sales_age = None
     if sales["imported_at"]:
@@ -1225,12 +1268,11 @@ def build_state(for_model=False):
 
     workers = [
         worker("inbox", "Inbox Clerk", st("Inbox Clerk", "ok" if inbox else "idle"),
-               "{} in line for tonight".format(len(inbox)) if inbox else "Inbox empty · drop a video or paste a link",
+               "{} in line to clip".format(len(inbox)) if inbox else "Inbox empty · drop a video or paste a link",
                len(inbox)),
-        worker("clipper", "Clipper", st("Clipper", "ok" if (night and log_recent) else ("idle" if night else "off")),
-               "Clipping now" if (night and log_recent) else
-               ("Night shift · waiting for videos" if night else "Starts {} · up to 3 clips".format(
-                   datetime.strptime(CONFIG["night_start"], "%H:%M").strftime("%I %p").lstrip("0"))),
+        worker("clipper", "Clipper", st("Clipper", "ok" if running else ("idle" if gate_open else "off")),
+               "Clipping now · up to 3 clips per video" if running else
+               ("Open · waiting for videos" if gate_open else "Closed · opens {}".format(nice_dt(nxt))),
                len(redo) or None),
         worker("captions", "Caption Writer",
                st("Caption Writer", "ok" if any(c["status"] == "new" for c in waiting) else "idle"),
@@ -1264,6 +1306,7 @@ def build_state(for_model=False):
         "brand": CONFIG["brand"],
         "now": now_iso(),
         "workers": workers,
+        "gate": gate_public(),
         "inbox": inbox,
         "clips_waiting": waiting,
         "clips_scheduled": scheduled,
@@ -1308,11 +1351,12 @@ def background_loop():
         try:
             scan_clips()
             check_autopilot_log()
+            run_clipper_gate()
             # Captions: once new clips appear after the night run (or any time a key exists).
             stamp = now().strftime("%Y-%m-%d %H")
             has_new = any(r.get("status") == "new" and not r.get("missing") for r in STATE["clips"].values())
             if has_new and secrets().get("anthropic_key") and stamp != last_captions_try \
-                    and not in_night_window():
+                    and not clipper_running():
                 last_captions_try = stamp
                 write_captions()
             # Post anything due.
@@ -1343,6 +1387,119 @@ def background_loop():
         except Exception:  # noqa: BLE001 - the loop must keep running
             sys.stderr.write("[StratusMedia] loop error\n" + traceback.format_exc())
         time.sleep(60)
+
+
+# ---------------------------------------------------------------- clipping gate runner
+# OpenShorts (Docker) only runs while the gate is open AND there is something to clip.
+# When a run finishes, or the gate closes, it is shut down so the trading desk keeps its memory.
+
+RUN = {"proc": None, "queue_before": None, "cool_until": 0.0, "stopped": True}
+
+
+def clipper_running():
+    p = RUN["proc"]
+    return bool(p and p.poll() is None)
+
+
+def _redo_pending():
+    try:
+        with open(os.path.join(CONFIG["clip_inbox"], "redo.json"), "r", encoding="utf-8") as fh:
+            return bool(json.load(fh))
+    except (OSError, ValueError):
+        return False
+
+
+def _log_line(msg):
+    try:
+        with open(CONFIG["autopilot_log"], "a", encoding="utf-8") as fh:
+            fh.write("[{}] [Dashboard] {}\n".format(now_iso(), msg))
+    except OSError:
+        pass
+
+
+def stop_openshorts(reason):
+    path = CONFIG["morning_stop"]
+    if not os.path.exists(path):
+        raise_error("Clipper", "Couldn't stop the clipper", "The stop script is missing ({}).".format(path),
+                    "Ask Claude in your project chat.", key="gate:stopmissing")
+        return
+    _log_line("Stopping OpenShorts: " + reason)
+    try:
+        subprocess.run(["/bin/bash", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180)
+    except Exception:  # noqa: BLE001
+        sys.stderr.write("[StratusMedia] stop error\n" + traceback.format_exc())
+    RUN["stopped"] = True
+
+
+def start_clipper():
+    path = CONFIG["night_run"]
+    if not os.path.exists(path):
+        raise_error("Clipper", "Couldn't start clipping", "The clipping script is missing ({}).".format(path),
+                    "Ask Claude in your project chat.", key="gate:runmissing")
+        return
+    env = dict(os.environ, AUTOPILOT_FORCE="1")
+    _log_line("Starting clipping run (gate open)")
+    log = open(CONFIG["autopilot_log"], "a", encoding="utf-8")
+    RUN["proc"] = subprocess.Popen(["/usr/bin/nice", "-n", "10", "/bin/bash", path], env=env,
+                                   stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    RUN["queue_before"] = [x.get("name") or x.get("url") for x in list_inbox()]
+    RUN["stopped"] = False
+
+
+def run_clipper_gate():
+    is_open = gate()
+    proc = RUN["proc"]
+    if proc and proc.poll() is not None:  # a run just finished
+        RUN["proc"] = None
+        left = [x.get("name") or x.get("url") for x in list_inbox()]
+        RUN["cool_until"] = time.time() + (3 * 3600 if left and left == RUN["queue_before"] else 15 * 60)
+        stop_openshorts("run finished")
+        return
+    if not is_open:
+        if clipper_running() or not RUN["stopped"]:
+            stop_openshorts("clipping closed")
+            RUN["proc"] = None
+        return
+    if clipper_running() or time.time() < RUN["cool_until"]:
+        return
+    if list_inbox() or _redo_pending():
+        start_clipper()
+
+
+def set_gate(action, override=False):
+    g = STATE.setdefault("clip_gate", {"manual": None, "until": None})
+    if action == "close":
+        nxt = next_window_open()
+        g["manual"], g["until"] = "closed", (nxt.strftime("%Y-%m-%dT%H:%M:%S") if nxt else None)
+        persist()
+        if clipper_running() or not RUN["stopped"]:
+            threading.Thread(target=stop_openshorts, args=("closed by Mr. McDonald",), daemon=True).start()
+            RUN["proc"] = None
+        return {"ok": True, "message": "Clipping closed. It stays closed until {}, or until you press Open.".format(
+            nice_dt(nxt))}
+    if in_clip_window():
+        g["manual"], g["until"] = None, None
+        persist()
+        RUN["cool_until"] = 0.0
+        return {"ok": True, "message": "Clipping is open. It starts as soon as a video is in the Inbox."}
+    if not override:
+        return {"ok": False, "needs_override": True,
+                "message": "It's trading hours. Clipping normally opens {}.".format(nice_dt(next_window_open()))}
+    nxt = next_window_open()  # once the schedule opens, it simply carries on
+    g["manual"], g["until"] = "open", (nxt.strftime("%Y-%m-%dT%H:%M:%S") if nxt else None)
+    persist()
+    RUN["cool_until"] = 0.0
+    return {"ok": True, "message": "Override on. Clipping is open now and carries on with the normal schedule."}
+
+
+def gate_public():
+    g = STATE.get("clip_gate") or {}
+    is_open = gate()
+    return {"open": is_open, "running": clipper_running(), "manual": g.get("manual"),
+            "in_window": in_clip_window(),
+            "next_open": nice_dt(next_window_open()) if not is_open else "",
+            "closes": nice_dt(_next_flip(now(), False)) if is_open and not g.get("manual") == "open" else "",
+            "hours": "Weekdays 2:30 PM to 6 AM · weekends all day"}
 
 
 LOG_POS = {"pos": None}
@@ -1376,18 +1533,18 @@ def explain_clipper_line(line):
     low = line.lower()
     if "docker" in low and ("not running" in low or "cannot connect" in low or "daemon" in low):
         return ("Docker (the engine the clipper runs in) didn't start.",
-                "Open the Docker app once, then the clipper retries tonight. Or ask Claude in your project chat.")
+                "Open the Docker app once, then the clipper retries on its next run. Or ask Claude in your project chat.")
     if "429" in low or "quota" in low or "resource_exhausted" in low:
         return ("Gemini (picks the best moments) hit its free daily limit.",
-                "Nothing to do. The video stays in line and runs again tomorrow night.")
+                "Nothing to do. The video stays in line and runs again on the next run tomorrow.")
     if "yt-dlp" in low or "download" in low:
         return ("The video link couldn't be downloaded. It may be private, deleted or blocked.",
                 "Check the link works in your browser, or download the video and drag it into the Inbox.")
     if "memory" in low or "oom" in low or "killed" in low:
         return ("The Mac ran out of memory while clipping.",
-                "Use a shorter video (10–20 min works best). I'll try it again tonight.")
+                "Use a shorter video (10–20 min works best). I'll try it again on the next run.")
     if "no space" in low or "disk" in low:
-        return ("The Mac's storage is full.", "Empty the Trash or delete old clips, then it retries tonight.")
+        return ("The Mac's storage is full.", "Empty the Trash or delete old clips, then it retries on the next run.")
     return ("The clipper's log says: " + line.strip()[:220],
             "Ask Claude in your project chat and paste this message.")
 
@@ -1564,7 +1721,7 @@ class Handler(BaseHTTPRequestHandler):
         if kind == "ugc":
             return self.send_json(add_ugc_video(dest, q))
         return self.send_json({"ok": True, "path": dest, "name": name,
-                               "message": "Added to the Clip Inbox for tonight." if kind == "video" else "Saved."})
+                               "message": "Added to the Clip Inbox. It's clipped on the next run." if kind == "video" else "Saved."})
 
 
 # ---------------------------------------------------------------- route handlers
@@ -1605,7 +1762,7 @@ def r_redo(d):
         if not rec:
             return {"ok": False, "message": "Clip not found."}
         write_redo(rec, d.get("note", ""))
-    return {"ok": True, "message": "The Clipper will redo it tonight."}
+    return {"ok": True, "message": "The Clipper will redo it on the next run."}
 
 
 def r_tiktok_done(d):
@@ -1711,6 +1868,13 @@ def r_retry(d):
         err["resolved"] = True
         return r_post_now({"id": cid})
     return {"ok": False, "message": "Nothing to retry."}
+
+
+def r_clip_gate(d):
+    action = d.get("action")
+    if action not in ("open", "close"):
+        return {"ok": False, "message": "Unknown action."}
+    return set_gate(action, bool(d.get("override")))
 
 
 def r_settings(d):
@@ -1833,6 +1997,7 @@ def add_ugc_video(path, q):
 
 
 ROUTES = {
+    "/api/clip-gate": r_clip_gate,
     "/api/link": r_link,
     "/api/approve": r_approve,
     "/api/skip": r_skip,
