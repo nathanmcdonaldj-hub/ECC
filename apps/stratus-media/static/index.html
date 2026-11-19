@@ -59,12 +59,10 @@ button{cursor:pointer}
 .stage{height:190px;display:flex;align-items:flex-end;justify-content:center;position:relative}
 .stage svg{height:106px;width:auto;max-width:100%}
 .stage::before{content:"";position:absolute;bottom:2px;left:30%;right:30%;height:12px;border-radius:50%;background:radial-gradient(closest-side,rgba(0,0,0,.45),transparent)}
-.stage img.emp{position:relative;height:182px;width:auto;max-width:100%;object-fit:contain;display:block;transform-origin:50% 100%;filter:drop-shadow(0 6px 10px rgba(0,0,0,.35));transition:transform .25s}
+.stage img.emp{position:relative;height:182px;width:auto;max-width:100%;object-fit:contain;display:block;transform-origin:50% 100%;transition:transform .25s}
 .st:hover .stage img.emp{transform:scale(1.04)}
-.stage img.emp:not(.anim){animation:none}
-.st.ok .stage img.emp:not(.anim),.st.you .stage img.emp:not(.anim),.st.idle .stage img.emp:not(.anim){animation:alive 3.2s ease-in-out infinite}
 @keyframes alive{0%,100%{transform:translateY(0) scaleY(1) rotate(0)}30%{transform:translateY(-2px) scaleY(1.012) rotate(-.6deg)}70%{transform:translateY(-1px) scaleY(1.006) rotate(.6deg)}}
-.st.off .stage img.emp{filter:grayscale(.75) brightness(.6) drop-shadow(0 6px 10px rgba(0,0,0,.35))}
+.st.off .stage img.emp{filter:grayscale(.75) brightness(.6)}
 .st.error .stage img.emp{filter:sepia(.4) saturate(1.6) hue-rotate(-35deg) brightness(.85)}
 @media (prefers-reduced-motion:reduce){.stage img.emp{animation:none!important}}
 img.face{width:42px;height:42px;border-radius:50%;object-fit:cover;object-position:50% 0%;background:#13215c;border:2px solid var(--gold)}
@@ -157,6 +155,7 @@ body.demo .st.done{opacity:.75}
   <div class="bar">
     <span class="sh">SH</span>
     <h1 id="hello">Stratus House Media<small id="sub">Loading…</small></h1>
+    <button class="pill" id="motionBtn">✨ Motion on</button>
     <button class="pill" id="demoBtn">▶ Demo</button>
     <button class="pill" id="settingsBtn">⚙ Settings</button>
     <button class="pill g" id="talkBtn">🎙 Talk to manager</button>
@@ -292,17 +291,28 @@ const LOOKS = {
    whenever the tab is hidden. Falls back to the still, then the drawn version. */
 const EMP_IMG = id => `/static/employees/${id}.png`;
 const EMP_ANIM = id => `/static/employees/${id}.webp`;
+/* Keep it light: only employees who are working (or waiting on you) move, only while
+   this window is in front and in use, and never when Motion is switched off. */
 const MOTION_OK = !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+let motionOn = (() => { try { return localStorage.getItem("motion") !== "off"; } catch (e) { return true; } })();
+const pageActive = () => !document.hidden && document.hasFocus();
+const wantsAnim = status => MOTION_OK && motionOn && (status === "ok" || status === "you");
 function empImg(id, sleep, status) {
-  const anim = MOTION_OK && !sleep && status !== "error";
-  const src = anim && !document.hidden ? EMP_ANIM(id) : EMP_IMG(id);
+  const anim = wantsAnim(status);
+  const src = anim && pageActive() ? EMP_ANIM(id) : EMP_IMG(id);
   return `<img class="emp${anim ? " anim" : ""}" data-id="${id}" src="${src}" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.classList.remove('anim');this.src=EMP_IMG('${id}')}else{this.outerHTML=workerSVG(LOOKS['${id}'], ${sleep})}">`;
 }
-document.addEventListener("visibilitychange", () => {
+function syncMotion() {
+  const on = pageActive();
   document.querySelectorAll("img.emp.anim").forEach(im => {
-    im.src = document.hidden ? EMP_IMG(im.dataset.id) : EMP_ANIM(im.dataset.id);
+    const want = on ? EMP_ANIM(im.dataset.id) : EMP_IMG(im.dataset.id);
+    if (!im.src.endsWith(want)) im.src = want;
   });
-});
+}
+document.addEventListener("visibilitychange", syncMotion);
+window.addEventListener("blur", syncMotion);
+window.addEventListener("focus", syncMotion);
+function motionLabel() { const b = $("#motionBtn"); if (b) b.textContent = motionOn ? "✨ Motion on" : "✨ Motion off"; }
 function faceImg(id) {
   return `<img class="face" src="${EMP_IMG(id)}" alt="" onerror="this.outerHTML='<span style=&quot;width:42px;display:inline-block&quot;>'+workerSVG(LOOKS['${id}'], false)+'</span>'">`;
 }
@@ -654,6 +664,11 @@ document.addEventListener("click", async e => {
   if (t.hasAttribute("data-scrim") && e.target === t) return closeSheet();
   const d = t.dataset;
   if (t.id === "demoBtn") return demoStart();
+  if (t.id === "motionBtn") {
+    motionOn = !motionOn;
+    try { localStorage.setItem("motion", motionOn ? "on" : "off"); } catch (e) {}
+    motionLabel(); lastFloor = ""; return render();
+  }
   if (demo) {
     if (d.demo === "exit") return demoExit();
     if (d.demo === "next") { demo.i++; return demoShow(); }
@@ -709,6 +724,7 @@ async function copyText(s) {
 }
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 
+motionLabel();
 refresh();
 setInterval(() => { if (!busy && !document.hidden) refresh(); }, 15000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) refresh(); });
