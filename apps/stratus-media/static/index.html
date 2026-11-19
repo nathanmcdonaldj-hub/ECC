@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stratus House Media</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23e3b54a'/%3E%3Ctext x='32' y='42' font-family='Georgia,serif' font-weight='700' font-size='28' text-anchor='middle' fill='%23030b2e'%3ESH%3C/text%3E%3C/svg%3E">
+<style>
+/* Look B "Studio Cards": flat navy, big rounded cards, gold actions; studio floor of stations with little workers. */
+:root{
+  --navy:#030b2e; --floor:#0a1747; --card:#13215c; --card2:#1a2a6c; --line:#2a3b7d;
+  --gold:#e3b54a; --gold2:#f6dc8a; --ink:#eef1fb; --mute:#9aa6cf;
+  --ok:#3ecf8e; --sleep:#7a86b3; --bad:#ff6b6b; --tt:#ff5c8a;
+  --sans:"Manrope","Avenir Next","Helvetica Neue",system-ui,sans-serif;
+  --serif:"Cinzel","Trajan Pro",Georgia,serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--navy);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--gold2);outline-offset:2px}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 20px 60px;display:flex;flex-direction:column;gap:16px}
+.bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.sh{width:44px;height:44px;border-radius:12px;background:var(--gold);color:var(--navy);display:grid;place-items:center;font:700 18px var(--serif)}
+.bar h1{margin:0;font-size:20px;font-weight:800;flex:1 1 240px}
+.bar h1 small{display:block;font-size:12px;color:var(--mute);font-weight:600}
+.pill{border:0;font-size:12px;font-weight:800;padding:8px 13px;border-radius:999px;background:var(--card);white-space:nowrap}
+.pill.g{background:var(--gold);color:var(--navy)}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.kpi{background:var(--card);border-radius:16px;padding:12px 14px;border:0;text-align:left}
+.kpi .v{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+.kpi .k{font-size:12px;color:var(--mute);font-weight:600}
+.kpi.hi{background:var(--gold);color:var(--navy)} .kpi.hi .k{color:#3b2e0a}
+.errs{display:flex;flex-direction:column;gap:8px}
+.err{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;background:rgba(255,107,107,.1);border:1px solid var(--bad);border-radius:14px;padding:12px 14px}
+.err .ic{width:28px;height:28px;border-radius:50%;background:var(--bad);color:var(--navy);display:grid;place-items:center;font-weight:800;flex:none}
+.err .body{flex:1 1 300px;min-width:0}
+.err b{display:block;font-size:14px}
+.err .what{color:var(--mute)}
+.err .fix{color:var(--gold2);font-weight:700}
+.err .acts{display:flex;gap:6px;flex-wrap:wrap}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mute)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+.floor{background:var(--floor);border-radius:20px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.lanehead{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold2);font-weight:800;margin:4px 6px 2px}
+.lane{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.belt{height:10px;border-radius:5px;margin:6px 6px 4px;background:repeating-linear-gradient(90deg,rgba(227,181,74,.55) 0 14px,transparent 14px 26px);background-size:26px 10px;animation:belt 1.4s linear infinite;opacity:.55}
+@keyframes belt{to{background-position:26px 0}}
+.st{background:var(--card);border-radius:18px;padding:12px 12px 14px;display:flex;flex-direction:column;gap:5px;min-width:0;position:relative;border:1px solid transparent;text-align:left;color:var(--ink)}
+.st:hover{border-color:var(--line)}
+.st.you{border-color:var(--gold);background:linear-gradient(180deg,#2a2a4f,#13215c)}
+.st.error{border-color:var(--bad);background:linear-gradient(180deg,#3a1f3a,#13215c)}
+.sign{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.sign b{font-size:13px;font-weight:800}
+.num{font-size:11px;color:var(--mute);font-weight:800}
+.stage{height:112px;display:flex;align-items:flex-end;justify-content:center;position:relative}
+.stage svg{height:106px;width:auto;max-width:100%}
+.desk{position:absolute;left:8%;right:8%;bottom:0;height:6px;border-radius:3px;background:var(--gold);opacity:.8}
+.status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800}
+.doing{font-size:12px;color:var(--mute)}
+.zzz{position:absolute;right:20%;top:6px;font-weight:800;color:var(--sleep);font-size:13px}
+.st.ok svg{animation:bob 1.2s ease-in-out infinite}
+@keyframes bob{50%{transform:translateY(-3px)}}
+.badge{position:absolute;top:-9px;right:10px;background:var(--gold);color:var(--navy);font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px}
+.st.error .badge{background:var(--bad)}
+@media (prefers-reduced-motion:reduce){.belt,.st.ok svg{animation:none}}
+/* sheet */
+.scrim{position:fixed;inset:0;background:rgba(1,4,20,.6);display:flex;justify-content:flex-end;z-index:20}
+.sheet{width:min(640px,100%);height:100%;overflow:auto;background:var(--floor);border-left:1px solid var(--line);padding:20px;display:flex;flex-direction:column;gap:14px}
+.sheet h2{margin:0;font-size:20px;font-weight:800;display:flex;align-items:center;gap:10px}
+.sheet h2 .x{margin-left:auto}
+.sheet h3{margin:6px 0 0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold2)}
+.muted{color:var(--mute)}
+.btn{border:0;border-radius:12px;padding:9px 14px;font-weight:800;font-size:13px;background:#1e2f78}
+a.btn{color:var(--ink);text-decoration:none;display:inline-block}
+.btn.go{background:var(--gold);color:var(--navy)}
+.btn.bad{background:transparent;border:1px solid var(--bad);color:var(--bad)}
+.btn.sm{padding:6px 10px;font-size:12px;border-radius:10px}
+.btn:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.box{background:var(--card);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:8px}
+input[type=text],input[type=password],input[type=url],input[type=datetime-local],textarea,select{width:100%;background:var(--navy);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+textarea{min-height:74px;resize:vertical}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mute);font-weight:700}
+.drop{border:2px dashed var(--line);border-radius:16px;padding:22px;text-align:center;color:var(--mute)}
+.drop.on{border-color:var(--gold);color:var(--gold2)}
+.clipcard{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;background:var(--card);border-radius:16px;padding:12px}
+.clipcard video{width:150px;aspect-ratio:9/16;border-radius:12px;background:#000;object-fit:cover}
+.clipcard .fields{display:flex;flex-direction:column;gap:8px;min-width:0}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:#13215c;border-radius:999px;padding:5px 11px;font-size:12px;font-weight:700}
+.chip.on{border-color:var(--gold);color:var(--gold2);background:rgba(227,181,74,.12)}
+.why{font-size:12px;color:var(--mute)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;vertical-align:top}
+th{color:var(--gold2);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.prog{height:8px;border-radius:4px;background:#1b2a63;overflow:hidden}
+.prog i{display:block;height:100%;background:var(--gold)}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--gold);color:var(--navy);font-weight:800;padding:10px 16px;border-radius:12px;z-index:40;max-width:90vw}
+/* chat */
+.chat{display:flex;flex-direction:column;gap:8px;flex:1;min-height:240px}
+.msgs{display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1;padding-right:4px}
+.msg{max-width:85%;padding:9px 12px;border-radius:14px;font-size:14px;white-space:pre-wrap}
+.msg.me{align-self:flex-end;background:#1c2c6e}
+.msg.sm{align-self:flex-start;background:rgba(227,181,74,.12);border:1px solid rgba(227,181,74,.4)}
+.msg small{display:block;font-size:10px;color:var(--gold2);letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px}
+.confirm{align-self:flex-start;background:var(--card);border:1px solid var(--gold);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;max-width:90%}
+.inbar{display:flex;gap:8px;align-items:center}
+.mic{width:44px;height:44px;border-radius:50%;border:0;background:var(--gold);display:grid;place-items:center;flex:none}
+.mic.rec{background:var(--bad);animation:pulse 1s infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 8px rgba(255,107,107,.2)}}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:5px 12px;font-size:12px;font-weight:800;color:var(--mute)}
+.seg button.on{background:var(--gold);color:var(--navy)}
+@media (max-width:900px){.lane{grid-template-columns:repeat(2,minmax(0,1fr))}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.clipcard{grid-template-columns:minmax(0,1fr)}.clipcard video{width:100%}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <span class="sh">SH</span>
+    <h1 id="hello">Stratus House Media<small id="sub">Loading…</small></h1>
+    <button class="pill" id="settingsBtn">⚙ Settings</button>
+    <button class="pill g" id="talkBtn">🎙 Talk to manager</button>
+  </div>
+  <div class="errs" id="errs"></div>
+  <div class="kpis" id="kpis"></div>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--ok)"></i>Working</span>
+    <span><i class="dot" style="background:var(--gold)"></i>Waiting on you</span>
+    <span><i class="dot" style="background:var(--sleep)"></i>Off shift / quiet</span>
+    <span><i class="dot" style="background:var(--bad)"></i>Problem</span>
+  </div>
+  <div class="floor" id="floor"></div>
+  <p class="muted" style="margin:0">Click any worker to open their station.</p>
+</div>
+<div id="sheetRoot"></div>
+<input type="file" id="filePick" hidden>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let S = null;            // latest state
+let openStation = null;  // station currently shown in the sheet
+let voiceOn = (() => { try { return localStorage.getItem("voice") !== "off"; } catch (e) { return true; } })();
+
+async function api(path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  let j = {}; try { j = await r.json(); } catch (e) {}
+  if (j.message) toast(j.message);
+  await refresh();
+  if (openStation) renderSheet(openStation, true);
+  return j;
+}
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 3600);
+}
+async function upload(kind, file, extra = "") {
+  toast("Uploading " + file.name + "…");
+  const r = await fetch(`/api/upload?kind=${kind}&name=${encodeURIComponent(file.name)}${extra}`, {method: "POST", body: file});
+  let j = {}; try { j = await r.json(); } catch (e) {}
+  toast(j.message || (r.ok ? "Saved." : "Upload failed."));
+  await refresh();
+  if (openStation && kind !== "cover") renderSheet(openStation, true);
+  return j;
+}
+function pickFile(accept, cb) {
+  const fp = $("#filePick"); fp.accept = accept; fp.value = "";
+  fp.onchange = () => fp.files[0] && cb(fp.files[0]); fp.click();
+}
+function dropZone(el, accept, cb) {
+  el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("on"); });
+  el.addEventListener("dragleave", () => el.classList.remove("on"));
+  el.addEventListener("drop", e => { e.preventDefault(); el.classList.remove("on"); [...e.dataTransfer.files].forEach(cb); });
+  el.addEventListener("click", () => pickFile(accept, cb));
+}
+
+/* ---------- little workers (flat SVG) ---------- */
+const G="#e3b54a",G2="#f6dc8a",N="#030b2e",W="#eef1fb";
+const props={
+  box:`<rect x="64" y="56" width="26" height="20" rx="2" fill="${G}"/><path d="M64 62h26" stroke="${N}" stroke-width="2"/><rect x="73" y="53" width="8" height="6" fill="${W}"/>`,
+  scissors:`<circle cx="70" cy="74" r="5" fill="none" stroke="${G}" stroke-width="3"/><circle cx="82" cy="74" r="5" fill="none" stroke="${G}" stroke-width="3"/><path d="M72 70l14-18M80 70l-10-18" stroke="${W}" stroke-width="3" stroke-linecap="round"/>`,
+  pen:`<rect x="62" y="64" width="26" height="16" rx="2" fill="${W}"/><path d="M66 69h14M66 74h10" stroke="#9aa6cf" stroke-width="2"/><path d="M84 52l6 6-12 12-7 1 1-7z" fill="${G}"/>`,
+  stamp:`<rect x="64" y="70" width="26" height="9" rx="2" fill="${G}"/><rect x="73" y="56" width="8" height="15" fill="${G2}"/><circle cx="77" cy="54" r="5" fill="${G}"/>`,
+  plane:`<path d="M62 70l32-16-10 26-7-7-8 5 2-9z" fill="${W}"/><path d="M77 73l17-19" stroke="${G}" stroke-width="2"/>`,
+  phone:`<rect x="68" y="50" width="18" height="30" rx="4" fill="${N}" stroke="${G}" stroke-width="2"/><path d="M73 62c3-3 6 3 9 0" stroke="#ff5c8a" stroke-width="2" fill="none"/>`,
+  chart:`<rect x="62" y="54" width="30" height="26" rx="3" fill="${W}"/><rect x="66" y="68" width="5" height="9" fill="${G}"/><rect x="74" y="63" width="5" height="14" fill="${G}"/><rect x="82" y="58" width="5" height="19" fill="${G}"/>`,
+  binoc:`<circle cx="70" cy="62" r="6" fill="${N}" stroke="${G}" stroke-width="3"/><circle cx="84" cy="62" r="6" fill="${N}" stroke="${G}" stroke-width="3"/><rect x="74" y="59" width="6" height="5" fill="${G}"/>`,
+  camera:`<rect x="62" y="58" width="30" height="20" rx="4" fill="${N}" stroke="${G}" stroke-width="2"/><circle cx="77" cy="68" r="6" fill="${G}"/><circle cx="77" cy="68" r="2.5" fill="${N}"/><rect x="66" y="54" width="8" height="5" rx="1" fill="${G}"/>`,
+  book:`<rect x="62" y="54" width="28" height="26" rx="2" fill="${W}"/><rect x="62" y="54" width="5" height="26" fill="${G}"/><path d="M72 62h12M72 67h9" stroke="#9aa6cf" stroke-width="2"/>`,
+  mic:`<rect x="74" y="60" width="3" height="20" fill="${W}"/><rect x="70" y="48" width="11" height="15" rx="5.5" fill="${G}"/><path d="M72 52h7M72 56h7" stroke="${N}" stroke-width="1.2"/>`
+};
+function workerSVG(o, sleep) {
+  const eyes = sleep ? `<path d="M40 40h5M53 40h5" stroke="${N}" stroke-width="2" stroke-linecap="round"/>`
+                     : `<circle cx="42.5" cy="40" r="2.2" fill="${N}"/><circle cx="55.5" cy="40" r="2.2" fill="${N}"/>`;
+  const top = o.hat === "cap" ? `<path d="M31 32a18 16 0 0 1 36 0z" fill="${G}"/><rect x="58" y="29" width="14" height="4" rx="2" fill="${G}"/>`
+    : o.hat === "beret" ? `<ellipse cx="47" cy="25" rx="19" ry="7" fill="${G}"/><circle cx="47" cy="18" r="2.5" fill="${G}"/>`
+    : `<path d="M31 37c0-14 8-20 18-20s18 6 18 20c-4-7-10-9-18-9s-14 2-18 9z" fill="${o.hair}"/>`;
+  const body = o.suit
+    ? `<rect x="28" y="58" width="40" height="44" rx="14" fill="${o.shirt}" stroke="#2a3b7d"/><path d="M40 59L49 80L58 59z" fill="${W}"/><path d="M40 59L46 82M58 59L52 82" stroke="#3a4c94" stroke-width="2.5"/><path d="M46.5 61h5l1.5 3.5-2.5 13-1.5 2-1.5-2-2.5-13z" fill="${G}"/><path d="M33 72l7 0-3.5 4z" fill="${G}"/>`
+    : `<rect x="28" y="58" width="40" height="44" rx="14" fill="${o.shirt}"/><path d="M40 60l8 10 8-10" fill="none" stroke="${G}" stroke-width="2"/>`;
+  return `<svg viewBox="0 0 100 110" aria-hidden="true">${body}<path d="M62 66l10 4" stroke="${o.shirt}" stroke-width="9" stroke-linecap="round"/><circle cx="73" cy="70" r="4.5" fill="${o.skin}"/><path d="M32 68l-4 14" stroke="${o.shirt}" stroke-width="9" stroke-linecap="round"/><circle cx="49" cy="40" r="18" fill="${o.skin}"/>${top}${eyes}<path d="M44 48q5 4 10 0" stroke="${N}" stroke-width="2" fill="none" stroke-linecap="round"/>${props[o.prop] || ""}</svg>`;
+}
+const LOOKS = {
+  inbox:{prop:"box",skin:"#c68a5c",shirt:"#2c4cb0",hair:"#2b1a10"},
+  clipper:{prop:"scissors",skin:"#f0c8a0",shirt:"#3a2f7a",hat:"beret"},
+  captions:{prop:"pen",skin:"#8d5a3b",shirt:"#1f6b5a",hair:"#111"},
+  desk:{prop:"stamp",skin:"#a86f48",shirt:"#0b1747",hair:"#1a1a1a"},
+  courier:{prop:"plane",skin:"#e7b98f",shirt:"#2c4cb0",hat:"cap"},
+  tiktok:{prop:"phone",skin:"#c68a5c",shirt:"#6b2a4a",hair:"#3a2210"},
+  analyst:{prop:"chart",skin:"#f0c8a0",shirt:"#1f3f8f",hair:"#6b4a2a"},
+  scout:{prop:"binoc",skin:"#8d5a3b",shirt:"#3a2f7a",hat:"cap"},
+  ugc:{prop:"camera",skin:"#e7b98f",shirt:"#1f6b5a",hat:"beret"},
+  sales:{prop:"book",skin:"#a86f48",shirt:"#2c4cb0",hair:"#111"},
+  manager:{prop:"mic",skin:"#c68a5c",shirt:"#050d33",hair:"#2b1a10",suit:true}
+};
+const LANES = [["Clip line",["inbox","clipper","captions","desk"]],["Posting + results",["courier","tiktok","analyst","scout"]],["Books + UGC",["ugc","sales","manager"]]];
+const STATUS = {ok:["var(--ok)","Working"],you:["var(--gold)","Waiting on you"],idle:["var(--sleep)","Quiet"],off:["var(--sleep)","Off shift"],error:["var(--bad)","Problem"]};
+
+/* ---------- render ---------- */
+function render() {
+  const h = new Date().getHours();
+  const greet = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+  $("#hello").innerHTML = `${greet}, ${esc(S.owner)}<small id="sub">${esc(S.brand)} · ${new Date().toLocaleString([], {weekday:"short", hour:"numeric", minute:"2-digit"})}</small>`;
+  document.title = (S.clips_waiting.length ? `(${S.clips_waiting.length}) ` : "") + "Stratus House Media";
+  $("#errs").innerHTML = S.errors.map(e => `
+    <div class="err" role="alert"><span class="ic">!</span>
+      <div class="body"><b>${esc(e.worker)}: ${esc(e.title)}${e.count > 1 ? ` (×${e.count})` : ""}</b>
+        <span class="what">What went wrong: ${esc(e.what)}</span><br><span class="fix">What to do: ${esc(e.fix)}</span>
+        <div class="muted" style="font-size:11px">${esc(e.time.replace("T", " "))}</div></div>
+      <div class="acts">
+        ${e.action === "settings" ? `<button class="btn go sm" data-act="settings">Open Settings</button>` : ""}
+        ${(e.action || "").startsWith("retry:") ? `<button class="btn go sm" data-retry="${e.id}">Retry</button>` : ""}
+        <button class="btn sm" data-dismiss="${e.id}">Got it</button></div></div>`).join("");
+  const st = S.stats;
+  $("#kpis").innerHTML = `
+    <button class="kpi ${S.clips_waiting.length ? "hi" : ""}" data-open="desk"><div class="v">${S.clips_waiting.length}</div><div class="k">Clips need your OK</div></button>
+    <button class="kpi" data-open="analyst"><div class="v">${st.views == null ? "–" : st.views.toLocaleString()}</div><div class="k">Views tracked</div></button>
+    <button class="kpi" data-open="courier"><div class="v">${S.posts_used} / ${S.posts_limit}</div><div class="k">Free posts this month</div></button>
+    <button class="kpi" data-open="sales"><div class="v">${S.sales.imported_at ? "$" + S.sales.royalty.toLocaleString(undefined,{minimumFractionDigits:2}) : "–"}</div><div class="k">Book royalties (last report)</div></button>`;
+  const W = Object.fromEntries(S.workers.map(w => [w.id, w]));
+  $("#floor").innerHTML = LANES.map(([title, ids], i) => `
+    <div class="lanehead">${title}</div>
+    <div class="lane">${ids.map((id, n) => {
+      const w = W[id]; const [c, label] = STATUS[w.status] || STATUS.idle;
+      const num = LANES.slice(0, i).reduce((a, l) => a + l[1].length, 0) + n + 1;
+      const badge = w.status === "error" ? "Problem" : (w.status === "you" && w.count ? w.count + " waiting" : "");
+      return `<button class="st ${w.status}" data-open="${id}">
+        ${badge ? `<span class="badge">${badge}</span>` : ""}
+        <div class="sign"><b>${esc(w.name)}</b><span class="num">#${num}</span></div>
+        <div class="stage">${workerSVG(LOOKS[id], w.status === "off")}<i class="desk"></i>${w.status === "off" ? '<span class="zzz">z z</span>' : ""}</div>
+        <span class="status"><i class="dot" style="background:${c}"></i>${label}</span>
+        <span class="doing">${esc(w.doing)}</span></button>`;
+    }).join("")}</div>
+    ${i < LANES.length - 1 ? '<div class="belt" aria-hidden="true"></div>' : ""}`).join("");
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/state"); S = await r.json();
+  } catch (e) {
+    $("#errs").innerHTML = `<div class="err"><span class="ic">!</span><div class="body"><b>Dashboard: can't reach the dashboard service</b><span class="what">What went wrong: the small helper program on your Mac stopped answering.</span><br><span class="fix">What to do: restart your Mac, or ask Claude in your project chat.</span></div></div>`;
+    return;
+  }
+  render();
+  // Live-refresh only read-only stations, so nothing he's typing gets wiped.
+  if (["clipper","courier","analyst","tiktok","sales","captions","scout"].includes(openStation)) renderSheet(openStation, true);
+}
+
+/* ---------- station sheets ---------- */
+function openSheet(id) { openStation = id; renderSheet(id); }
+function closeSheet() { openStation = null; $("#sheetRoot").innerHTML = ""; }
+function renderSheet(id, soft) {
+  const w = S.workers.find(x => x.id === id) || {name: "Settings"};
+  const scrollTop = soft ? ($("#sheetRoot .sheet")?.scrollTop || 0) : 0;
+  const html = (SHEETS[id] || (() => ""))();
+  $("#sheetRoot").innerHTML = `<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-label="${esc(w.name)}">
+    <h2>${id === "settings" ? "⚙" : `<span style="width:40px;display:inline-block">${workerSVG(LOOKS[id], false)}</span>`}${esc(id === "settings" ? "Settings" : w.name)}<button class="btn sm x" data-close>Close</button></h2>
+    ${w.doing ? `<div class="muted">${esc(w.doing)}</div>` : ""}${html}</div></div>`;
+  $("#sheetRoot .sheet").scrollTop = scrollTop;
+  (AFTER[id] || (() => {}))();
+}
+
+const platformChips = (sel, key) => ["instagram","youtube","tiktok"].map(p =>
+  `<button class="chip ${sel.includes(p) ? "on" : ""}" data-plat="${p}" data-key="${esc(key)}">${{instagram:"Instagram",youtube:"YouTube",tiktok:"TikTok (you post)"}[p]}</button>`).join("");
+const musicSelect = (cur, key) => `<select data-music="${esc(key)}"><option value="none" ${cur === "none" ? "selected" : ""}>No music</option><option value="auto" ${cur === "auto" ? "selected" : ""}>Auto (light track)</option>${S.music.map(m => `<option ${cur === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>`;
+
+const SHEETS = {
+  inbox: () => `
+    <div class="drop" id="vidDrop">Drag a video here, or click to pick one<br><small>Clipped tonight between 10 PM and 6 AM · 10–20 min videos work best</small></div>
+    <div class="box"><label class="f">Or paste a video link<input type="url" id="linkIn" placeholder="https://…"></label><div><button class="btn go" id="linkGo">Add link</button></div>
+      <div class="muted" style="font-size:12px">Only use videos you own or have permission to post.</div></div>
+    <h3>In line for tonight</h3>
+    ${S.inbox.length ? `<table><tr><th>Item</th><th>Type</th></tr>${S.inbox.map(i => `<tr><td style="word-break:break-all">${esc(i.name)}</td><td>${i.kind === "link" ? "Link" : i.size_mb + " MB"}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing in line.</p>`}`,
+  clipper: () => `
+    <div class="box"><b>Night shift: 10 PM to 6 AM</b><span class="muted">One video at a time, up to 3 clips each. During the day the clipper is fully off, so your trading desk gets the whole Mac.</span></div>
+    <h3>Redo requests for tonight</h3>
+    ${S.redo.length ? S.redo.map(c => `<div class="box"><b>Clip ${c.num} · ${esc(c.source)}</b><span class="muted">“${esc(c.redo?.note)}”</span></div>`).join("") : `<p class="muted">None. To redo a clip, open Your Desk and press Redo, or tell the manager.</p>`}`,
+  captions: () => `
+    <div class="box"><span>The Caption Writer drafts a hook line, a call to action, 3–5 hashtags, the platforms and the best time for each new clip, every morning after the night shift.</span>
+    <div><button class="btn go" id="capGo">Write captions now</button></div></div>`,
+  desk: () => {
+    const list = S.clips_waiting;
+    if (!list.length) return `<p class="muted">Nothing waiting on you. New clips show up here each morning.</p>`;
+    return (list.some(c => c.status === "new") ? `<div class="box"><span>Some clips have no captions yet.</span><div><button class="btn go" id="capGo">Write captions now</button></div></div>` : "") +
+      list.map(c => `<div class="clipcard" data-clip="${esc(c.id)}">
+        <video src="${c.music_url || c.video_url}" ${c.thumb_url ? `poster="${c.thumb_url}"` : ""} controls preload="none" playsinline></video>
+        <div class="fields">
+          <b>${c.source === "UGC" ? "UGC video" : "Clip " + c.num} · <span class="muted">${esc(c.source)}</span></b>
+          <label class="f">Caption (hook + call to action)<textarea data-f="caption">${esc(c.caption)}</textarea></label>
+          <label class="f">Hashtags<input type="text" data-f="hashtags" value="${esc(c.hashtags)}"></label>
+          <div class="chips">${platformChips(c.platforms, c.id)}</div>
+          <label class="f">When<input type="datetime-local" data-f="time" value="${esc(c.time || "")}"></label>
+          ${c.why ? `<div class="why">Why this time: ${esc(c.why)}</div>` : ""}
+          <label class="f">Light background music ${S.music_ready ? "" : "<span style='color:var(--bad)'>(mixer not installed)</span>"}${musicSelect(c.music || "none", c.id)}</label>
+          <div class="row">
+            <button class="btn go" data-approve="${esc(c.id)}">Approve</button>
+            <button class="btn sm" data-preview="${esc(c.id)}">Hear with music</button>
+            <button class="btn sm" data-redo="${esc(c.id)}">Redo…</button>
+            <button class="btn bad sm" data-skip="${esc(c.id)}">Skip</button></div>
+        </div></div>`).join("");
+  },
+  courier: () => `
+    <div class="box"><b>${S.posts_used} of ${S.posts_limit} free posts used this month</b><div class="prog"><i style="width:${Math.min(100, S.posts_used / S.posts_limit * 100)}%"></i></div>
+      <span class="muted" style="font-size:12px">Each platform counts as one post. Upload-Post Basic ($24/mo) removes the limit and adds TikTok.</span></div>
+    <h3>Scheduled</h3>
+    ${S.clips_scheduled.length ? `<table><tr><th>Clip</th><th>Where</th><th>When</th><th></th></tr>${S.clips_scheduled.map(c => `<tr><td>${esc((c.caption || "").split("\n")[0].slice(0, 60))}</td><td>${c.platforms.map(p => p[0].toUpperCase() + p.slice(1)).join(", ")}</td><td>${esc(c.time_nice)}</td><td class="row"><button class="btn sm go" data-postnow="${esc(c.id)}">Post now</button><button class="btn sm" data-unsched="${esc(c.id)}">Back to desk</button></td></tr>`).join("")}</table>` : `<p class="muted">Nothing scheduled.</p>`}
+    <h3>Posted</h3>
+    ${S.posted.length ? `<table><tr><th>Clip</th><th>When</th><th>Result</th></tr>${S.posted.map(c => `<tr><td>${esc((c.caption || "").split("\n")[0].slice(0, 60))}</td><td>${esc((c.posted_at || "").replace("T", " ").slice(0, 16))}</td><td>${c.status === "partial" ? "Some platforms failed" : "Posted"}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing posted yet.</p>`}`,
+  tiktok: () => S.tiktok.length ? S.tiktok.map(c => `<div class="box"><b>${esc((c.caption || "").split("\n")[0])}</b><span class="muted">Planned: ${esc(c.time_nice)}</span>
+      <div class="row"><button class="btn go sm" data-copy="${esc(c.id)}">Copy caption</button><button class="btn sm" data-reveal="${esc(c.id)}">Show clip in Finder</button>
+      <a class="btn sm" href="https://www.tiktok.com/upload" target="_blank" rel="noopener" style="text-decoration:none">Open TikTok upload</a><button class="btn sm" data-ttdone="${esc(c.id)}">I posted it</button></div></div>`).join("")
+    : `<p class="muted">Nothing to post by hand. Clips with TikTok ticked show up here.</p>`,
+  analyst: () => {
+    const st = S.stats; const f = st.followers || {};
+    const bar = (label, have, need) => `<div class="box"><b>${label}</b><div class="prog"><i style="width:${Math.min(100, (have || 0) / need * 100)}%"></i></div><span class="muted" style="font-size:12px">${have == null ? "No number yet" : have.toLocaleString()} of ${need.toLocaleString()}</span></div>`;
+    return `<div class="box"><b>${st.views == null ? "No view numbers yet" : st.views.toLocaleString() + " views tracked"}</b><span class="muted">${st.fetched_at ? "Updated " + esc(st.fetched_at.replace("T", " ").slice(0, 16)) : "Numbers start a few hours after your first post. Updated every 6 hours."}</span></div>
+      <h3>Progress to getting paid</h3>
+      ${bar("YouTube: 1,000 subscribers", f.youtube, 1000)}
+      <div class="muted" style="font-size:12px">YouTube also needs 10M Shorts views in 90 days. TikTok pays from 10k followers, and only for videos over 1 minute. Instagram doesn't pay per view for most creators. Estimated earnings stay $0 until a platform starts paying.</div>
+      ${bar("TikTok: 10,000 followers", f.tiktok, 10000)}`;
+  },
+  scout: () => `<div class="box"><b>Weekly trend brief</b><span class="muted">Every ${esc(S.workers.find(w => w.id === "scout").doing.replace("Next brief ", "").replace(" · in your project chat", ""))}: 3 video ideas to film, niches take turns. It arrives in your project chat.</span></div>`,
+  ugc: () => `
+    <h3>1 · Your coloring books</h3>
+    ${S.books.map(b => `<div class="box"><div class="row"><b style="flex:1">${esc(b.title)}</b><button class="btn sm bad" data-delbook="${b.id}">Remove</button></div>${b.amazon_url ? `<span class="muted" style="word-break:break-all">${esc(b.amazon_url)}</span>` : ""}${b.cover ? `<img src="/book-cover?id=${b.id}" alt="" style="max-width:120px;border-radius:8px">` : ""}</div>`).join("")}
+    <div class="box"><label class="f">Book name<input type="text" id="bkTitle"></label><label class="f">Amazon link<input type="url" id="bkUrl" placeholder="https://www.amazon.com/dp/…"></label>
+      <div class="row"><button class="btn sm" id="bkCover">Add cover image</button><span class="muted" id="bkCoverName"></span></div><div><button class="btn go" id="bkSave">Save book</button></div></div>
+    <h3>2 · Pick a book and a style</h3>
+    <div class="box"><select id="ugcBook">${S.books.map(b => `<option value="${b.id}">${esc(b.title)}</option>`).join("")}</select>
+      <div class="chips" id="ugcStyles">${[["flip","Flip-through"],["unboxing","Unboxing"],["timelapse","Coloring time-lapse"],["review","Talking review"],["gift","Gift idea"]].map((s, i) => `<button class="chip ${i ? "" : "on"}" data-style="${s[0]}">${s[1]}</button>`).join("")}</div>
+      <div><button class="btn go" id="ugcGo" ${S.books.length ? "" : "disabled"}>Make the video brief</button></div></div>
+    <h3>3 · Make it in Higgsfield</h3>
+    ${S.ugc.slice().reverse().slice(0, 5).map(u => `<div class="box"><b>${esc(u.book)} · ${esc(u.style)}</b><span class="muted" style="font-size:12px">${esc(u.prompt)}</span>
+      <div class="row"><button class="btn go sm" data-copyprompt="${u.id}">Copy prompt</button><a class="btn sm" href="https://higgsfield.ai" target="_blank" rel="noopener" style="text-decoration:none">Open Higgsfield</a><button class="btn sm" data-ugcdrop="${u.id}">Add finished video</button></div>
+      <span class="muted" style="font-size:12px">${u.status === "made" ? "Sent to Your Desk." : "Higgsfield shows the credit cost before you press Generate. Download the video, then press “Add finished video”."}</span></div>`).join("") || `<p class="muted">No briefs yet.</p>`}`,
+  sales: () => {
+    const s = S.sales;
+    return `<div class="drop" id="kdpDrop">Drop your KDP report here (.xlsx or .csv), or click to pick it<br><small>KDP → Reports → Prior Months' Royalties or Orders → Download</small></div>
+      ${s.imported_at ? `<div class="box"><b>${s.units} sold · $${s.royalty.toLocaleString(undefined,{minimumFractionDigits:2})} royalty</b><span class="muted">From ${esc(s.file)} · imported ${esc(s.imported_at.replace("T", " ").slice(0, 16))}${s.other_currencies.length ? " · other currencies not added: " + esc(s.other_currencies.join(", ")) : ""}</span></div>
+      <table><tr><th>Book</th><th>Sold</th><th>Royalty (USD)</th></tr>${s.books.map(b => `<tr><td>${esc(b.title)}</td><td>${b.units}</td><td>$${b.royalty.toFixed(2)}</td></tr>`).join("")}</table>` : `<p class="muted">No report imported yet.</p>`}`;
+  },
+  manager: () => `
+    <div class="row"><span class="muted">Brain</span><div class="seg" id="modelSeg">${S.models.map(m => `<button class="${m === S.chat_model ? "on" : ""}" data-model="${m}">${m.includes("opus") ? "Opus 5.5" : "Sonnet 5.5"}</button>`).join("")}</div>
+      <label class="row" style="margin-left:auto;font-size:12px"><input type="checkbox" id="voiceTog" ${voiceOn ? "checked" : ""}> Speak replies out loud</label></div>
+    <div class="chat"><div class="msgs" id="msgs">
+      ${S.chat_log.map(l => `<div class="msg me">${esc(l.me)}</div><div class="msg sm"><small>Social Media Manager</small>${esc(l.manager)}</div>`).join("") || `<div class="msg sm"><small>Social Media Manager</small>Hello, ${esc(S.owner)}. Ask me how the week went, what's waiting on you, or tell me to schedule a clip.</div>`}
+      ${S.pending_actions.map(confirmCard).join("")}
+    </div>
+    <div class="inbar"><input type="text" id="chatIn" placeholder="Type, or press the mic and talk…" autocomplete="off">
+      <button class="mic" id="micBtn" aria-label="Talk"><svg viewBox="0 0 24 24" width="18" height="18"><rect x="9" y="3" width="6" height="11" rx="3" fill="#030b2e"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4" stroke="#030b2e" stroke-width="2" fill="none" stroke-linecap="round"/></svg></button>
+      <button class="btn go" id="sendBtn">Send</button></div></div>
+    <span class="muted" style="font-size:12px">Opus 5.5 is the default. Sonnet 5.5 costs about half. Nothing posts until you press Confirm.</span>`,
+  settings: () => `
+    <div class="box"><label class="f">Claude API key (from your trading desk) ${S.settings.has_anthropic_key ? "✅ saved" : "⚠️ not saved"}<input type="password" id="kClaude" placeholder="${S.settings.has_anthropic_key ? "Saved · paste a new one to replace" : "Paste key"}" autocomplete="off"></label>
+      <label class="f">Upload-Post key ${S.settings.has_upload_post_key ? "✅ saved" : "⚠️ not saved"}<input type="password" id="kUpload" placeholder="${S.settings.has_upload_post_key ? "Saved · paste a new one to replace" : "Paste key"}" autocomplete="off"></label>
+      <div class="row"><button class="btn go" id="kSave">Save keys</button><button class="btn sm" id="kTest">Test Claude</button></div>
+      <span class="muted" style="font-size:12px">Keys are stored only on this Mac and are never shown again.</span></div>
+    <div class="box"><b>Light music library</b><span class="muted" style="font-size:12px">${S.music.length} track(s) in Movies → Stratus Music. Use royalty-free songs only, so posts don't get copyright strikes.</span>
+      <div class="row"><button class="btn sm" id="addMusic">Add a song</button></div>
+      ${S.music.map(m => `<div class="row"><span style="flex:1">${esc(m)}</span><audio src="/music?f=${encodeURIComponent(m)}" controls preload="none" style="height:30px"></audio></div>`).join("")}</div>
+    <div class="box"><b>Posting profile</b><span class="muted">Upload-Post profile: ${esc(S.settings.profile)} (Instagram + YouTube)${S.settings.dry_run ? " · TEST MODE: nothing really posts" : ""}</span></div>
+    ${S.past_errors.length ? `<h3>Fixed problems</h3><table>${S.past_errors.map(e => `<tr><td>${esc(e.time.replace("T"," ").slice(0,16))}</td><td>${esc(e.worker)}: ${esc(e.title)}</td></tr>`).join("")}</table>` : ""}`
+};
+
+function confirmCard(a) {
+  return `<div class="confirm"><b>Confirm post</b><span>${esc((a.caption || "").split("\n")[0])}</span>
+    <span class="muted">${a.platforms.map(p => p[0].toUpperCase() + p.slice(1)).join(", ")} · ${esc(a.time_nice || a.time)}</span>
+    <div class="row"><button class="btn go sm" data-confirm="${a.id}">Confirm</button><button class="btn sm" data-cancel="${a.id}">Cancel</button></div></div>`;
+}
+
+const AFTER = {
+  inbox: () => {
+    dropZone($("#vidDrop"), "video/*", f => upload("video", f));
+    $("#linkGo").onclick = () => api("/api/link", {url: $("#linkIn").value});
+  },
+  ugc: () => {
+    let cover = null;
+    $("#bkCover").onclick = () => pickFile("image/*", async f => { const j = await upload("cover", f); cover = j.path; $("#bkCoverName").textContent = f.name; });
+    $("#bkSave").onclick = () => api("/api/book", {title: $("#bkTitle").value, amazon_url: $("#bkUrl").value, cover});
+  },
+  sales: () => dropZone($("#kdpDrop"), ".xlsx,.csv", f => upload("kdp", f)),
+  manager: () => {
+    const m = $("#msgs"); m.scrollTop = m.scrollHeight;
+    $("#sendBtn").onclick = sendChat;
+    $("#chatIn").onkeydown = e => { if (e.key === "Enter") sendChat(); };
+    $("#micBtn").onclick = toggleMic;
+    $("#voiceTog").onchange = e => { voiceOn = e.target.checked; try { localStorage.setItem("voice", voiceOn ? "on" : "off"); } catch (x) {} };
+    $("#chatIn").focus();
+  },
+  settings: () => {
+    $("#kSave").onclick = () => api("/api/settings", {anthropic_key: $("#kClaude").value, upload_post_key: $("#kUpload").value});
+    $("#kTest").onclick = () => api("/api/test-claude");
+    $("#addMusic").onclick = () => pickFile("audio/*", f => upload("music", f));
+  }
+};
+
+/* ---------- chat + voice ---------- */
+let busy = false;
+async function sendChat(textArg) {
+  const inp = $("#chatIn"); const text = (typeof textArg === "string" ? textArg : inp.value).trim();
+  if (!text || busy) return;
+  busy = true; inp.value = "";
+  const m = $("#msgs");
+  m.insertAdjacentHTML("beforeend", `<div class="msg me">${esc(text)}</div><div class="msg sm" id="thinking"><small>Social Media Manager</small>Thinking…</div>`);
+  m.scrollTop = m.scrollHeight;
+  let j = {};
+  try { const r = await fetch("/api/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text})}); j = await r.json(); }
+  catch (e) { j = {reply: "I couldn't reach the dashboard service."}; }
+  busy = false;
+  await refresh();
+  if (openStation === "manager") renderSheet("manager", true);
+  if (voiceOn && j.reply && "speechSynthesis" in window) {
+    const u = new SpeechSynthesisUtterance(j.reply.replace(/[#*_`]/g, ""));
+    const v = speechSynthesis.getVoices().find(v => /en-US/.test(v.lang) && /(Daniel|Alex|Aaron|Evan|Nathan|Tom)/.test(v.name)) || speechSynthesis.getVoices().find(v => /en/.test(v.lang));
+    if (v) u.voice = v; u.rate = 1.03; speechSynthesis.cancel(); speechSynthesis.speak(u);
+  }
+}
+let rec = null;
+function toggleMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast("Voice input needs Safari or Chrome. You can still type."); return; }
+  if (rec) { rec.stop(); return; }
+  rec = new SR(); rec.lang = "en-US"; rec.interimResults = true;
+  const btn = $("#micBtn"); btn.classList.add("rec");
+  let finalText = "";
+  rec.onresult = e => { let t = ""; for (const r of e.results) t += r[0].transcript; $("#chatIn").value = t; if (e.results[e.results.length - 1].isFinal) finalText = t; };
+  rec.onerror = e => { toast(e.error === "not-allowed" ? "Allow the microphone for this page in your browser settings." : "Didn't catch that. Try again."); };
+  rec.onend = () => { btn.classList.remove("rec"); rec = null; if (finalText) sendChat(finalText); };
+  rec.start();
+}
+
+/* ---------- clicks ---------- */
+document.addEventListener("click", async e => {
+  const t = e.target.closest("button, [data-scrim]");
+  if (!t) return;
+  if (t.hasAttribute("data-scrim") && e.target === t) return closeSheet();
+  const d = t.dataset;
+  if (d.open) return openSheet(d.open);
+  if (t.hasAttribute("data-close")) return closeSheet();
+  if (d.act === "settings" || t.id === "settingsBtn") return openSheet("settings");
+  if (t.id === "talkBtn") return openSheet("manager");
+  if (d.dismiss) return api("/api/dismiss-error", {id: d.dismiss});
+  if (d.retry) return api("/api/retry", {error_id: d.retry});
+  if (t.id === "capGo") { t.disabled = true; t.textContent = "Writing…"; return api("/api/captions"); }
+  if (d.plat) { t.classList.toggle("on"); return; }
+  if (d.style) { t.parentElement.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c === t)); return; }
+  const card = t.closest("[data-clip]");
+  const read = () => ({
+    id: card.dataset.clip,
+    caption: $("[data-f=caption]", card).value, hashtags: $("[data-f=hashtags]", card).value,
+    time: $("[data-f=time]", card).value,
+    platforms: [...card.querySelectorAll(".chip.on")].map(c => c.dataset.plat),
+    music: $("[data-music]", card).value
+  });
+  if (d.approve) { const v = read(); if (!v.platforms.length) return toast("Pick at least one platform."); return api("/api/approve", v); }
+  if (d.preview) { const v = read(); if (v.music === "none") v.music = "auto"; toast("Mixing music…"); const j = await api("/api/music-preview", {id: v.id, music: v.music}); if (j.ok) toast("Press play to hear it with " + j.track); return; }
+  if (d.skip) return api("/api/skip", {id: d.skip});
+  if (d.redo) {
+    const box = document.createElement("div"); box.className = "box";
+    box.innerHTML = `<label class="f">What should change?<input type="text" placeholder="e.g. make it shorter, start at the punchline"></label><div class="row"><button class="btn go sm">Redo tonight</button></div>`;
+    t.closest(".fields").appendChild(box); const inp = $("input", box); inp.focus();
+    $("button", box).onclick = () => inp.value.trim() && api("/api/redo", {id: d.redo, note: inp.value.trim()});
+    return;
+  }
+  if (d.postnow) { t.disabled = true; t.textContent = "Posting…"; return api("/api/post-now", {id: d.postnow}); }
+  if (d.unsched) return api("/api/unschedule", {id: d.unsched});
+  if (d.copy) { const c = [...S.tiktok].find(x => x.id === d.copy); return copyText((c.caption || "") + "\n\n" + (c.hashtags || "")); }
+  if (d.reveal) return api("/api/reveal", {id: d.reveal});
+  if (d.ttdone) return api("/api/tiktok-done", {id: d.ttdone});
+  if (d.model) return api("/api/model", {model: d.model});
+  if (d.confirm) return api("/api/confirm", {id: d.confirm, yes: true});
+  if (d.cancel) return api("/api/confirm", {id: d.cancel, yes: false});
+  if (d.delbook) return api("/api/book", {delete: d.delbook});
+  if (t.id === "ugcGo") { const style = $("#ugcStyles .chip.on").dataset.style; return api("/api/ugc-brief", {book_id: $("#ugcBook").value, style}); }
+  if (d.copyprompt) { const u = S.ugc.find(x => x.id === d.copyprompt); return copyText(u.prompt); }
+  if (d.ugcdrop) return pickFile("video/*", f => upload("ugc", f, "&brief=" + d.ugcdrop));
+});
+async function copyText(s) {
+  try { await navigator.clipboard.writeText(s); toast("Copied."); }
+  catch (e) { prompt("Copy this:", s); }
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
+
+refresh();
+setInterval(() => { if (!busy) refresh(); }, 15000);
+</script>
+</body>
+</html>
