@@ -363,7 +363,7 @@ def scan_clips():
                 rec = {"status": "new", "caption": "", "hashtags": "",
                        "platforms": ["instagram", "youtube"],
                        "time": suggest_time(sum(1 for r in STATE["clips"].values() if r.get("status") in ("new", "ready"))),
-                       "why": "", "music": "none", "added": now_iso()}
+                       "why": "", "music": "auto", "added": now_iso()}
                 STATE["clips"][cid] = rec
             rec.update({k: info[k] for k in ("id", "source", "file", "thumb", "num", "notes", "mtime")})
             rec["missing"] = False
