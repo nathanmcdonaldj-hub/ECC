@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
     # Clipping hours: weekdays from market close until morning, weekends all day.
     "clip_weekday_open": "14:30",
     "clip_close": "06:30",
+    "clip_schedule": False,   # his call 2026-11-20: no time limits; he opens/closes it himself
     "clip_weekends_all_day": True,
     "night_run": os.path.join(HOME, "openshorts", "autopilot", "night_run.sh"),
     "morning_stop": os.path.join(HOME, "openshorts", "autopilot", "morning_stop.sh"),
@@ -247,6 +248,8 @@ def parse_hhmm(s):
 def in_clip_window(dt=None):
     """Weekdays from market close (2:30 PM) to 6:30 AM; Saturday and Sunday all day."""
     dt = dt or now()
+    if not CONFIG.get("clip_schedule", False):
+        return True
     if CONFIG.get("clip_weekends_all_day", True) and dt.weekday() >= 5:
         return True
     oh, om = parse_hhmm(CONFIG["clip_weekday_open"])
@@ -955,7 +958,7 @@ How you talk: short, blunt, numbers first, plain words, no jargon, no recaps. Co
 questions first. When there are options give at most 3 and mark your pick. Never show \
 passwords or keys. If you were wrong, say "I was wrong" plainly.
 
-What you run: clips are made from his Clip Inbox on weekdays from 2:30 PM (after he finishes trading) to 6:30 AM and all day on weekends, 3 clips per video max (he can press Open/Close on the dashboard); you and the \
+What you run: clips are made from his Clip Inbox whenever clipping is OPEN (no fixed hours; he presses Open/Close on the dashboard himself), 3 clips per video max; you and the \
 Caption Writer prepare caption (hook, call to action, 3–5 hashtags), platform and time; he \
 approves on Your Desk; the Courier posts to Instagram + YouTube through Upload-Post (free \
 plan: 10 posts a month); TikTok he posts by hand. He also sells coloring books on Amazon KDP \
@@ -1358,7 +1361,7 @@ def build_state(for_model=False):
                len(inbox)),
         worker("clipper", "Clipper", st("Clipper", "ok" if running else ("idle" if gate_open else "off")),
                "Clipping now · up to 3 clips per video" if running else
-               ("Open · waiting for videos" if gate_open else "Closed · opens {}".format(nice_dt(nxt))),
+               ("Open · waiting for videos" if gate_open else ("Closed · opens {}".format(nice_dt(nxt)) if nxt else "Closed · press OPEN to start")),
                len(redo) or None),
         worker("captions", "Caption Writer",
                st("Caption Writer", "ok" if any(c["status"] == "new" for c in waiting) else "idle"),
@@ -1584,8 +1587,8 @@ def set_gate(action, override=False):
         if clipper_running() or not RUN["stopped"]:
             threading.Thread(target=stop_openshorts, args=("closed by Mr. McDonald",), daemon=True).start()
             RUN["proc"] = None
-        return {"ok": True, "message": "Clipping closed. It stays closed until {}, or until you press Open.".format(
-            nice_dt(nxt))}
+        return {"ok": True, "message": ("Clipping closed. It stays closed until {}, or until you press Open.".format(nice_dt(nxt))
+                                        if nxt else "Clipping closed. It stays closed until you press Open.")}
     if in_clip_window():
         g["manual"], g["until"] = None, None
         persist()
@@ -1608,7 +1611,7 @@ def gate_public():
             "in_window": in_clip_window(),
             "next_open": nice_dt(next_window_open()) if not is_open else "",
             "closes": nice_dt(_next_flip(now(), False)) if is_open and not g.get("manual") == "open" else "",
-            "hours": "Weekdays 2:30 PM to 6:30 AM · weekends all day"}
+            "hours": "Any time · you open and close it"}
 
 
 LOG_POS = {"pos": None}
