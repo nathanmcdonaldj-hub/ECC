@@ -328,17 +328,20 @@ def clip_work():
     return [x for x in list_inbox() if ready or not x.get("hide")]
 
 
-def hide_flags():
-    d = load_json(os.path.join(CONFIG["clip_inbox"], HIDE_FILE), {})
+GAMEPLAY_FILE = "gameplay.json"   # same format: clipper keeps only moments that show game play
+
+
+def hide_flags(fname=HIDE_FILE):
+    d = load_json(os.path.join(CONFIG["clip_inbox"], fname), {})
     return {"links": list(d.get("links") or []), "files": list(d.get("files") or [])}
 
 
-def set_hide(kind, value, on):
-    d = hide_flags()
+def set_hide(kind, value, on, fname=HIDE_FILE):
+    d = hide_flags(fname)
     key = "links" if kind == "link" else "files"
     d[key] = [x for x in d[key] if x != value] + ([value] if on else [])
     try:
-        save_json(os.path.join(CONFIG["clip_inbox"], HIDE_FILE), d)
+        save_json(os.path.join(CONFIG["clip_inbox"], fname), d)
     except OSError:
         pass
 
@@ -346,6 +349,7 @@ def set_hide(kind, value, on):
 def list_inbox():
     inbox = CONFIG["clip_inbox"]
     hide = hide_flags()
+    game = hide_flags(GAMEPLAY_FILE)
     processed = set()
     for name in ("processed.txt",):
         for base in (inbox, os.path.join(CONFIG["openshorts_dir"], "autopilot")):
@@ -368,7 +372,7 @@ def list_inbox():
                 full = os.path.join(inbox, name)
                 if name in processed or full in processed:
                     continue
-                items.append({"kind": "video", "name": name, "hide": name in hide["files"],
+                items.append({"kind": "video", "name": name, "hide": name in hide["files"], "game": name in game["files"],
                               "size_mb": round(os.path.getsize(full) / 1e6, 1)})
     except OSError:
         pass
@@ -377,7 +381,7 @@ def list_inbox():
             for line in fh:
                 url = line.strip()
                 if url and not url.startswith("#") and url not in processed:
-                    items.append({"kind": "link", "name": url, "hide": url in hide["links"]})
+                    items.append({"kind": "link", "name": url, "hide": url in hide["links"], "game": url in game["links"]})
     except OSError:
         pass
     return items
@@ -1266,7 +1270,7 @@ def write_captions(force_ids=None):
 
 # ---------------------------------------------------------------- actions
 
-def add_link(url, hide=False):
+def add_link(url, hide=False, game=False):
     url = (url or "").strip()
     if not re.match(r"^https?://\S+$", url):
         return False, "That doesn't look like a video link."
@@ -1277,12 +1281,15 @@ def add_link(url, hide=False):
             fh.write(url + "\n")
         if hide:
             set_hide("link", url, True)
+        if game:
+            set_hide("link", url, True, GAMEPLAY_FILE)
     except OSError as exc:
         raise_error("Inbox Clerk", "Couldn't save the link",
                     "Writing to Movies → Clip Inbox failed ({}).".format(exc),
                     "Ask Claude in your project chat to check the Clip Inbox folder.", key="inbox:write")
         return False, "Couldn't save it."
-    return True, "Queued for the next clipping run." + (" The streamer's face and voice will be hidden." if hide else "")
+    return True, "Queued for the next clipping run." + (" The streamer's face and voice will be hidden." if hide else "") \
+        + (" Only game play moments will be clipped." if game else "")
 
 
 def write_redo(rec, note):
@@ -1650,6 +1657,12 @@ def check_autopilot_log():
 
 def explain_clipper_line(line):
     low = line.lower()
+    if "gameplay:" in low and "no game play" in low:
+        return ("A “Game play only” video had no moments that show the game (all desktop, web pages or chatting), so no clips were made.",
+                "Nothing to do. Try a video with more game play.")
+    if "gameplay: check failed" in low:
+        return ("The game-play check couldn't run for one clip (Gemini didn't answer), so that clip was left out to be safe.",
+                "Nothing to do. If it keeps happening, ask Claude in your project chat.")
     if "hide:" in low and "fills the screen" in low:
         return ("A video with “Hide the streamer” on was skipped: the streamer fills the whole screen, so he can't be hidden.",
                 "Nothing to do. Pick videos where he's in a small webcam box, or turn Hide off for that one.")
@@ -1850,6 +1863,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(add_ugc_video(dest, q))
         if kind == "video" and (q.get("hide") or [""])[0] == "1":
             set_hide("file", name, True)
+        if kind == "video" and (q.get("game") or [""])[0] == "1":
+            set_hide("file", name, True, GAMEPLAY_FILE)
         return self.send_json({"ok": True, "path": dest, "name": name,
                                "message": "Added to the Clip Inbox. It's clipped on the next run." if kind == "video" else "Saved."})
 
@@ -1857,7 +1872,7 @@ class Handler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------- route handlers
 
 def r_link(d):
-    ok, msg = add_link(d.get("url"), bool(d.get("hide")))
+    ok, msg = add_link(d.get("url"), bool(d.get("hide")), bool(d.get("game")))
     return {"ok": ok, "message": msg}
 
 

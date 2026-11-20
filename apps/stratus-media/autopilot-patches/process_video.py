@@ -35,6 +35,19 @@ HIDE_WORK = os.path.join(REPO, "output", "_hide")
 HOST_FFMPEG = os.path.join(HOME, "stratus-media", "bin", "ffmpeg")
 EXIT_RETRY = 75   # night_run.sh: hide failed, leave it in the queue for the next run
 
+# --- Stratus House "Game play only" (added 2026-11-20) ----------------------
+# Flagged in ~/Movies/Clip Inbox/gameplay.json (same format as hide.json). OpenShorts is asked
+# for more candidates; each candidate's frames are checked by Gemini (same key) and only clips
+# that show the game itself are kept (no tweets, web pages, desktop, just-chatting).
+GAME_FILE = os.path.join(HOME, "Movies", "Clip Inbox", "gameplay.json")
+GAME_CANDIDATES = 8
+GEMINI_MODEL = os.environ.get("STRATUS_GEMINI_MODEL", "gemini-2.5-flash")
+GAME_PROMPT = ("These are {n} frames from one short clip of a livestream. For EACH frame decide if it mainly shows "
+               "video game play (the game world, game HUD, cutscene or game menu). NOT game play: a desktop or file "
+               "window, a web page, social media posts or tweets, a chat window, a video player showing something "
+               "else, or the streamer's camera filling most of the frame. Reply with JSON only: "
+               "{{\"gameplay\": [true/false for each frame in order]}}")
+
 
 def log(*a):
     print(time.strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
@@ -66,9 +79,9 @@ class Api:
                                f"{e.read().decode(errors='replace')[:600]}")
 
 
-def hide_flagged(video, is_url):
+def hide_flagged(video, is_url, path=HIDE_FILE):
     try:
-        with open(HIDE_FILE, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             d = json.load(fh)
     except (OSError, ValueError):
         return False
@@ -162,6 +175,57 @@ def hide_voice(folder, label):
                  "(Stratus House, %s).\n" % time.strftime("%Y-%m-%d %H:%M"))
 
 
+def clip_frames(path, n=4):
+    """n small JPEG frames spread across a clip (host ffmpeg), as bytes."""
+    import tempfile
+    out = []
+    probe = subprocess.run([HOST_FFMPEG, "-hide_banner", "-i", path], capture_output=True, text=True).stderr
+    m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", probe)
+    dur = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)) if m else 30.0
+    with tempfile.TemporaryDirectory() as td:
+        for i in range(n):
+            t = dur * (i + 0.5) / n
+            f = os.path.join(td, f"f{i}.jpg")
+            subprocess.run([HOST_FFMPEG, "-y", "-loglevel", "error", "-ss", f"{t:.2f}", "-i", path, "-frames:v", "1",
+                            "-vf", "scale=512:-2", "-q:v", "5", f], timeout=60)
+            if os.path.exists(f):
+                with open(f, "rb") as fh:
+                    out.append(fh.read())
+    return out
+
+
+def is_gameplay(path, key):
+    """True when at least 3 of 4 frames show the game. None if the check itself failed."""
+    import base64
+    frames = clip_frames(path)
+    if not frames:
+        return None
+    parts = [{"text": GAME_PROMPT.format(n=len(frames))}] + [
+        {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(b).decode()}} for b in frames]
+    body = json.dumps({"contents": [{"parts": parts}],
+                       "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}).encode()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, data=body, method="POST",
+                                         headers={"Content-Type": "application/json", "x-goog-api-key": key})
+            with urllib.request.urlopen(req, timeout=90) as r:
+                data = json.loads(r.read())
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            votes = [bool(v) for v in json.loads(re.search(r"\{.*\}", text, re.S).group(0))["gameplay"]]
+            return sum(votes) >= max(1, len(votes) - 1)
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 503) and attempt < 2:
+                time.sleep(20)
+                continue
+            log(f"GAMEPLAY: check failed (HTTP {e.code})")
+            return None
+        except Exception as e:
+            log(f"GAMEPLAY: check failed ({str(e)[:120]})")
+            return None
+    return None
+
+
 MEDIA_EXT = (".mp4", ".mov", ".m4v", ".mkv", ".webm", ".m4a", ".mp3", ".wav", ".aac", ".opus", ".ogg")
 
 
@@ -241,13 +305,27 @@ def thumbnail(clip_host_path, job_id, clip_file, dest):
     shutil.move(os.path.join(REPO, "output", job_id, os.path.basename(tmp)), dest)
 
 
-def collect(api, status, source, display=None):
+def collect(api, status, source, display=None, game_key=None):
     job_id = status["job_id"]
     clips = (status.get("result") or {}).get("clips") or []
     if not clips:
         raise RuntimeError("job finished with no clips")
     order = sorted(range(len(clips)),
-                   key=lambda i: (-(float(clips[i].get("predicted_score") or -1)), i))[:TOP_N]
+                   key=lambda i: (-(float(clips[i].get("predicted_score") or -1)), i))
+    if game_key:
+        keep = []
+        for i in order:
+            f = os.path.basename((clips[i].get("video_url") or "").split("?")[0])
+            ok = is_gameplay(os.path.join(REPO, "output", job_id, f), game_key)
+            log(f"GAMEPLAY: candidate {i} -> {'game play' if ok else ('not game play' if ok is False else 'check failed')}")
+            if ok:
+                keep.append(i)
+            if len(keep) >= TOP_N:
+                break
+        if not keep:
+            raise RuntimeError("GAMEPLAY: no game play moments found in this video")
+        order = keep
+    order = order[:TOP_N]
     name = display or source
     if not display and source.startswith(("http://", "https://")):
         import glob
@@ -304,6 +382,9 @@ def main():
     body = {"acknowledged": True, "output_format": "vertical", "captions": True,
             "auto_hook": True, "clip_max_seconds": 59, "target_clips": TOP_N}
     hide = hide_flagged(video, is_url)
+    game = hide_flagged(video, is_url, GAME_FILE)
+    if game:
+        body["target_clips"] = GAME_CANDIDATES   # more candidates, keep the best 3 that show the game
     display = None
     if hide:
         label = video if is_url else os.path.basename(video)
@@ -345,11 +426,12 @@ def main():
                    {"Content-Type": "application/json"})["job_id"]
     print(f"JOB_ID {jid}", flush=True)
     log(f"job {jid} started")
+    gk = key if game else None
     if not hide:
-        wait_and_collect(api, jid, video, quiet)
+        wait_and_collect(api, jid, video, quiet, game_key=gk)
         return
     try:
-        folder = wait_and_collect(api, jid, video, quiet, display)
+        folder = wait_and_collect(api, jid, video, quiet, display, game_key=gk)
         hide_voice(folder, label)
     finally:
         removed = scrub_job_media(jid)   # also when the job failed: partial clips have his voice
@@ -369,7 +451,7 @@ def upload(api, video):
     return slot["upload_id"]
 
 
-def wait_and_collect(api, jid, video, quiet, display=None):
+def wait_and_collect(api, jid, video, quiet, display=None, game_key=None):
     t0, last = time.time(), None
     while True:
         st = api.call("GET", f"/api/status/{jid}")
@@ -385,7 +467,7 @@ def wait_and_collect(api, jid, video, quiet, display=None):
             raise RuntimeError("job still running after 4 h")
         time.sleep(20)
     st["job_id"] = jid
-    folder = collect(api, st, video, display)
+    folder = collect(api, st, video, display, game_key)
     log(f"saved clips to {folder}")
     print(f"SAVED {folder}", flush=True)
     if not quiet:
