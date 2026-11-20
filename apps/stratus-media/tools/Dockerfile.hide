@@ -2,9 +2,19 @@
 # Build on the Mac:  docker build -t stratus-hide --build-arg BASE=<openshorts backend image> -f Dockerfile.hide .
 ARG BASE=openshorts-backend
 FROM ${BASE}
-# Keep the container's torch: install demucs without letting pip swap torch.
+# The base image runs as appuser and its venv belongs to root: install as root, switch back after.
+USER root
+# Keep the container's torch: demucs and friends go in with --no-deps. torchaudio is matched to torch
+# and comes from PyTorch's CPU index like the base torch (+cpu): the PyPI aarch64 wheel is a CUDA build.
 RUN TV=$(python -c "import torch;print(torch.__version__.split('+')[0])") \
- && pip install --no-cache-dir --no-deps "torchaudio==${TV}" demucs==4.0.1 openunmix dora-search julius lameenc einops \
- && pip install --no-cache-dir omegaconf retrying submitit treetable cloudpickle diffq 2>/dev/null || true
-RUN python -c "from demucs.pretrained import get_model; get_model('htdemucs')"
+ && pip install --no-cache-dir --no-deps --index-url https://download.pytorch.org/whl/cpu "torchaudio==${TV}" \
+ && pip install --no-cache-dir --no-deps demucs==4.0.1 openunmix dora-search julius lameenc einops \
+ && pip install --no-cache-dir omegaconf retrying submitit treetable cloudpickle
+# Fail the build if torch was swapped, and check the imports the tool needs.
+RUN python -c "import torch, torchaudio, demucs, scipy; v=torch.__version__; print('torch', v, 'torchaudio', torchaudio.__version__, 'demucs', demucs.__version__); assert v.startswith('2.11'), v"
+# Bake the htdemucs weights into the image so clipping runs need no network.
+ENV TORCH_HOME=/opt/torch
+RUN mkdir -p /opt/torch && python -c "from demucs.pretrained import get_model; get_model('htdemucs')" \
+ && chmod -R a+rX /opt/torch
 COPY hide_streamer.py /opt/stratus/hide_streamer.py
+USER appuser

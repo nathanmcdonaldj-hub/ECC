@@ -143,6 +143,34 @@ def stage_face(src, dst, report=None):
 
 # ---------------------------------------------------------------- voice
 
+def split_no_vocals(wav_in, wav_out):
+    """htdemucs via its Python API (no torchaudio I/O: torchaudio 2.11 needs torchcodec to save).
+    Writes everything except the vocals stem as 16-bit stereo WAV."""
+    import numpy as np
+    import torch
+    from scipy.io import wavfile
+    from demucs.apply import apply_model
+    from demucs.pretrained import get_model
+    torch.set_num_threads(int(os.environ.get("HIDE_THREADS", "3")))
+    sr, data = wavfile.read(wav_in)
+    if data.ndim == 1:
+        data = np.stack([data, data], axis=1)
+    x = torch.from_numpy(data.T.astype(np.float32) / 32768.0)
+    model = get_model("htdemucs")
+    model.eval()
+    if sr != model.samplerate:
+        raise RuntimeError("expected {} Hz audio, got {}".format(model.samplerate, sr))
+    ref = x.mean(0)
+    mean, std = ref.mean(), ref.std() + 1e-8
+    with torch.no_grad():
+        out = apply_model(model, ((x - mean) / std)[None], device="cpu", split=True, overlap=0.25,
+                          segment=7, num_workers=0, progress=False)[0]
+    out = out * std + mean
+    voc = model.sources.index("vocals")
+    bed = sum(out[i] for i in range(len(model.sources)) if i != voc)
+    wavfile.write(wav_out, sr, (bed.clamp(-1, 1).numpy().T * 32767).astype(np.int16))
+
+
 def stage_voice(src, dst):
     tmp = tempfile.mkdtemp(prefix="hide_")
     try:
@@ -150,9 +178,8 @@ def stage_voice(src, dst):
         run([FFMPEG, "-y", "-loglevel", "error", "-i", src, "-vn", "-ac", "2", "-ar", "44100", wav])
         bed = None
         try:
-            run(["nice", "-n", "15", sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs",
-                 "--segment", "7", "-j", "1", "-d", "cpu", "-o", tmp, wav], timeout=1800)
-            cand = os.path.join(tmp, "htdemucs", "a", "no_vocals.wav")
+            cand = os.path.join(tmp, "no_vocals.wav")
+            split_no_vocals(wav, cand)
             if os.path.exists(cand):
                 bed = cand
         except Exception as exc:  # noqa: BLE001
