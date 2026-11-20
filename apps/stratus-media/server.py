@@ -415,7 +415,9 @@ def scan_clips():
             rec.update({k: info[k] for k in ("id", "source", "file", "thumb", "num", "notes", "mtime")})
             rec["missing"] = False
         for cid, rec in STATE["clips"].items():
-            if cid not in found and rec.get("status") in ("new", "ready", "scheduled"):
+            if rec.get("source") == "UGC":   # made videos live in UGC Videos, not the clip folder
+                rec["missing"] = not os.path.exists(rec.get("file") or "")
+            elif cid not in found and rec.get("status") in ("new", "ready", "scheduled"):
                 rec["missing"] = True
     return found
 
