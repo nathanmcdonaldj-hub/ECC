@@ -68,6 +68,30 @@ button{cursor:pointer}
 .post .plats{display:flex;gap:6px;flex-wrap:wrap}
 .post .plat{font-size:11px;font-weight:800;padding:4px 9px;border-radius:999px;background:var(--navy);color:var(--ink);text-decoration:none}
 .post .plat small{color:var(--mute);font-weight:700}
+.cwrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:16px;align-items:start}
+@media (max-width:860px){.cwrap{grid-template-columns:1fr}}
+.cform{background:var(--card);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.cform h3{margin:0;font-size:13px;color:var(--gold2);text-transform:uppercase;letter-spacing:.06em}
+.kinds{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kind{border:2px solid var(--line);background:var(--navy);border-radius:16px;padding:12px;text-align:left;display:flex;flex-direction:column;gap:3px;cursor:pointer}
+.kind b{font-size:15px}.kind span{font-size:12px;color:var(--mute);font-weight:600}
+.kind.on{border-color:var(--gold);background:rgba(227,181,74,.1)}
+.kind .ic{font-size:26px}
+.setup{border:1px dashed var(--gold);border-radius:14px;padding:10px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px}
+.setup b{color:var(--gold2)}
+.cards{display:flex;flex-direction:column;gap:12px}
+.ccard{background:var(--card);border-radius:18px;padding:12px;display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px}
+@media (max-width:520px){.ccard{grid-template-columns:1fr}}
+.ccard .thumb{width:120px;height:213px;border-radius:12px;background:var(--navy);display:grid;place-items:center;overflow:hidden;color:var(--mute);font-size:12px;text-align:center;border:0;padding:0}
+.ccard .thumb video{width:100%;height:100%;object-fit:cover}
+.ccard .info{display:flex;flex-direction:column;gap:8px;min-width:0}
+.badge{font-size:11px;font-weight:900;padding:3px 9px;border-radius:999px;background:var(--navy);align-self:flex-start}
+.badge.plan{color:var(--gold2)}.badge.making{color:#7fd6ff}.badge.done{color:#6be39a}.badge.failed{color:#ff8a8a}
+.spin{width:30px;height:30px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--gold);animation:sp 1.2s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+.price{font-size:20px;font-weight:900;font-variant-numeric:tabular-nums;color:var(--gold2)}
+details.pr summary{cursor:pointer;font-size:12px;color:var(--mute);font-weight:800}
 .empty{background:var(--card);border-radius:18px;padding:28px;text-align:center;color:var(--mute)}
 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .kpi{background:var(--card);border-radius:16px;padding:12px 14px;border:0;text-align:left}
@@ -201,6 +225,7 @@ body.demo .st.done{opacity:.75}
   <nav class="tabs" role="tablist">
     <button class="tab on" data-tab="floor" role="tab">🏢 Studio Floor</button>
     <button class="tab" data-tab="live" role="tab">🎬 Live Posts</button>
+    <button class="tab" data-tab="create" role="tab">🎥 Create</button>
   </nav>
   <div id="floorView">
   <div class="legend">
@@ -213,6 +238,7 @@ body.demo .st.done{opacity:.75}
   <p class="muted" style="margin:0">Click any employee to open their station.</p>
   </div>
   <div id="liveView" hidden></div>
+  <div id="createView" hidden></div>
 </div>
 <div id="demoRoot"></div>
 <div id="sheetRoot"></div>
@@ -363,6 +389,7 @@ function overrideModal() {
 function render() {
   renderGate();
   renderLive(false);
+  renderCreate(false);
   document.title = (S.clips_waiting.length ? `(${S.clips_waiting.length}) ` : "") + "Stratus House Media";
   $("#errs").innerHTML = S.errors.map(e => `
     <div class="err" role="alert"><span class="ic">!</span>
@@ -485,6 +512,7 @@ const SHEETS = {
   },
   scout: () => `<div class="box"><b>Weekly trend brief</b><span class="muted">Every ${esc(S.workers.find(w => w.id === "scout").doing.replace("Next brief ", "").replace(" · in your project chat", ""))}: 3 video ideas to film, niches take turns. It arrives in your project chat.</span></div>`,
   ugc: () => `
+    <div class="setup"><span style="flex:1"><b>New:</b> type the video you want and the dashboard makes it for you.</span><button class="btn go sm" data-gocreate="1">🎥 Open Create</button></div>
     <h3>1 · Your coloring books</h3>
     ${S.books.map(b => `<div class="box"><div class="row"><b style="flex:1">${esc(b.title)}</b><button class="btn sm bad" data-delbook="${b.id}">Remove</button></div>${b.amazon_url ? `<span class="muted" style="word-break:break-all">${esc(b.amazon_url)}</span>` : ""}${b.cover ? `<img src="/book-cover?id=${b.id}" alt="" style="max-width:120px;border-radius:8px">` : ""}</div>`).join("")}
     <div class="box"><label class="f">Book name<input type="text" id="bkTitle"></label><label class="f">Amazon link<input type="url" id="bkUrl" placeholder="https://www.amazon.com/dp/…"></label>
@@ -517,6 +545,8 @@ const SHEETS = {
   settings: () => `
     <div class="box"><label class="f">Claude API key (from your trading desk) ${S.settings.has_anthropic_key ? "✅ saved" : "⚠️ not saved"}<input type="password" id="kClaude" placeholder="${S.settings.has_anthropic_key ? "Saved · paste a new one to replace" : "Paste key"}" autocomplete="off"></label>
       <label class="f">Upload-Post key ${S.settings.has_upload_post_key ? "✅ saved" : "⚠️ not saved"}<input type="password" id="kUpload" placeholder="${S.settings.has_upload_post_key ? "Saved · paste a new one to replace" : "Paste key"}" autocomplete="off"></label>
+      <label class="f">Higgsfield API key ID ${S.settings.has_higgsfield_key ? "✅ saved" : "⚠️ not saved · needed for the Create tab"}<input type="password" id="kHfId" placeholder="${S.settings.has_higgsfield_key ? "Saved · paste a new one to replace" : "Paste the Key ID"}" autocomplete="off"></label>
+      <label class="f">Higgsfield API key secret<input type="password" id="kHfSecret" placeholder="Paste the Secret" autocomplete="off"></label>
       <div class="row"><button class="btn go" id="kSave">Save keys</button><button class="btn sm" id="kTest">Test Claude</button></div>
       <span class="muted" style="font-size:12px">Keys are stored only on this Mac and are never shown again.</span></div>
     <div class="box"><b>Light music library</b><span class="muted" style="font-size:12px">${S.music.length} track(s) in Movies → Stratus Music. Use royalty-free songs only, so posts don't get copyright strikes.</span>
@@ -552,7 +582,11 @@ const AFTER = {
     $("#chatIn").focus();
   },
   settings: () => {
-    $("#kSave").onclick = () => api("/api/settings", {anthropic_key: $("#kClaude").value, upload_post_key: $("#kUpload").value});
+    $("#kSave").onclick = () => {
+      const id = $("#kHfId").value.trim(), sec = $("#kHfSecret").value.trim();
+      if ((id && !sec) || (!id && sec)) return toast("Higgsfield needs both the Key ID and the Secret.");
+      api("/api/settings", {anthropic_key: $("#kClaude").value, upload_post_key: $("#kUpload").value, higgsfield_key: id && sec ? (id.includes(":") ? id : id + ":" + sec) : ""});
+    };
     $("#kTest").onclick = () => api("/api/test-claude");
     $("#addMusic").onclick = () => pickFile("audio/*", f => upload("music", f));
   }
@@ -714,8 +748,9 @@ function postTotals(c) {
 function setTab(t) {
   tab = t; try { localStorage.setItem("tab", t); } catch (e) {}
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
-  $("#floorView").hidden = t !== "floor"; $("#liveView").hidden = t !== "live";
+  $("#floorView").hidden = t !== "floor"; $("#liveView").hidden = t !== "live"; $("#createView").hidden = t !== "create";
   if (t === "live") renderLive(true);
+  if (t === "create") renderCreate(true);
 }
 let lastLive = "";
 function renderLive(force) {
@@ -752,6 +787,77 @@ function renderLive(force) {
   if (!force && document.querySelector("#liveView video")) return;
   lastLive = html; $("#liveView").innerHTML = html;
 }
+/* ---------- Create tab ---------- */
+let cKind = "promo", cLen = 5;
+const C_EXAMPLES = {
+  promo: ["A mom and her daughter coloring the bunny page at a cozy kitchen table", "Hands flip through the book slowly on a wooden desk, warm morning light", "Someone opens an Amazon box and smiles when they see the book"],
+  original: ["A golden retriever sprinting on a beach at sunset, slow motion", "A businessman in a navy suit walking into a glass skyscraper at dawn", "A woman doing a morning stretch on a balcony over a city"]
+};
+const C_STATUS = {plan: "Plan ready · not made yet", submitting: "Starting…", making: "Making it… 2 to 6 min", done: "Done · at Your Desk", failed: "Didn't finish"};
+function createForm() {
+  const books = S.books || [];
+  return `<div class="cform">
+    ${S.settings.has_higgsfield_key ? "" : `<div class="setup"><span style="flex:1"><b>One-time setup:</b> add your Higgsfield API key so videos can be made right here.</span><button class="btn go sm" data-act="settings">Open Settings</button></div>`}
+    <h3>1 · What kind of video?</h3>
+    <div class="kinds">
+      <button class="kind ${cKind === "promo" ? "on" : ""}" data-ckind="promo"><span class="ic">📚</span><b>Book promo (UGC)</b><span>Real-looking phone video that sells one of your coloring books</span></button>
+      <button class="kind ${cKind === "original" ? "on" : ""}" data-ckind="original"><span class="ic">✨</span><b>Original video</b><span>Anything else, from scratch: dogs, fitness, success, funny</span></button>
+    </div>
+    ${cKind === "promo" ? (books.length ? `<label class="f">Which book?<select id="cBook">${books.map(b => `<option value="${b.id}">${esc(b.title)}${b.cover ? "" : " (no cover yet)"}</option>`).join("")}</select></label>
+      <label class="row" style="font-size:13px;gap:8px"><input type="checkbox" id="cCover" checked> Start the video from my book cover (if it has one)</label>`
+      : `<div class="setup"><span style="flex:1">Add a coloring book first (name, Amazon link, cover).</span><button class="btn sm" data-open="ugc">Add a book</button></div>`) : ""}
+    <h3>2 · Describe it in your own words</h3>
+    <textarea id="cAsk" rows="4" placeholder="e.g. ${esc(C_EXAMPLES[cKind][0])}"></textarea>
+    <div class="chips">${C_EXAMPLES[cKind].map(x => `<button class="chip" data-cex="${esc(x)}">${esc(x.length > 38 ? x.slice(0, 36) + "…" : x)}</button>`).join("")}</div>
+    <h3>3 · How long?</h3>
+    <div class="chips"><button class="chip ${cLen === 5 ? "on" : ""}" data-clen="5">5 seconds</button><button class="chip ${cLen === 10 ? "on" : ""}" data-clen="10">10 seconds</button></div>
+    <button class="btn go" id="cPlan" style="padding:12px">✍️ Plan it · shows the price first</button>
+    <span class="muted" style="font-size:12px">Your manager writes the video plan and caption. Nothing is spent until you press <b>Make it</b>.</span>
+  </div>`;
+}
+function createCard(c) {
+  const p = c.plan || {};
+  const usd = c.usd != null ? "$" + Number(c.usd).toFixed(2) : null;
+  const thumb = c.status === "done" && c.video_url
+    ? `<button class="thumb" data-cplay="${c.id}" aria-label="Play">▶ Play</button>`
+    : c.status === "making" || c.status === "submitting" ? `<div class="thumb"><div class="spin"></div></div>`
+    : `<div class="thumb">${c.kind === "promo" ? "📚" : "✨"}<br>${c.duration}s · 9:16</div>`;
+  const editable = c.status === "plan" || c.status === "failed";
+  return `<div class="ccard">${thumb}<div class="info">
+    <span class="badge ${c.status === "submitting" ? "making" : c.status}">${C_STATUS[c.status] || c.status}</span>
+    <b>${esc(p.title || "New video")}</b>
+    <span class="muted" style="font-size:12px">${c.kind === "promo" ? "Promo for " + esc(c.book || "") + (c.use_cover ? " · starts from cover" : "") : "Original"} · ${c.duration}s · you asked: “${esc(c.ask)}”</span>
+    ${c.error ? `<span style="color:#ff8a8a;font-size:13px;font-weight:700">${esc(c.error)}</span>` : ""}
+    ${editable ? `<details class="pr"><summary>See or tweak the video plan</summary><textarea data-cedit="${c.id}" data-f="prompt" rows="5">${esc(p.prompt)}</textarea></details>
+      <label class="f">Caption<textarea data-cedit="${c.id}" data-f="caption" rows="3">${esc(p.caption)}</textarea></label>
+      <div class="row" style="align-items:center">${usd ? "" : `<span class="muted" style="font-size:12px">${S.settings.has_higgsfield_key ? "Price check failed · shown again after you press Make it" : "Price shows once your Higgsfield key is in Settings"}</span>`}
+        <button class="btn go" data-cmake="${c.id}" data-usd="${usd || ""}">${c.status === "failed" ? "↻ Try again" : "🎬 Make it"}${usd ? " · " + usd : ""}</button>
+        <button class="btn sm bad" data-cdel="${c.id}">Delete</button></div>`
+    : c.status === "done" ? `<span class="muted" style="font-size:12px">Caption and hashtags are ready. Approve it at Your Desk. Nothing posts without your OK.</span><div class="row"><button class="btn go sm" data-open="desk">Go to Your Desk</button></div>`
+    : `<span class="muted" style="font-size:12px">You can leave this page. You'll get a Mac notification when it's ready.</span>`}
+  </div></div>`;
+}
+let lastCreateList = "";
+function renderCreate(force) {
+  if (tab !== "create" || !S) return;
+  const list = S.creations || [];
+  const listHTML = `<h3 style="margin:0 0 4px">Your videos</h3>${list.length ? `<div class="cards">${list.map(createCard).join("")}</div>`
+    : `<div class="empty"><b style="color:var(--ink)">Nothing made yet</b><br>Describe a video on the left and press Plan it. Your plan and price show up here.</div>`}`;
+  if (force || !$("#cForm")) {
+    $("#createView").innerHTML = `<div class="cwrap"><div id="cForm">${createForm()}</div><div id="cList">${listHTML}</div></div>`;
+    lastCreateList = listHTML; return;
+  }
+  const busy = document.activeElement && document.activeElement.closest && document.activeElement.closest("#cList");
+  if (listHTML !== lastCreateList && !busy && !$("#cList video")) { $("#cList").innerHTML = listHTML; lastCreateList = listHTML; }
+}
+document.addEventListener("focusout", e => {
+  const d = e.target.dataset || {};
+  if (d.cedit) {
+    const c = (S.creations || []).find(x => x.id === d.cedit);
+    if (c && c.plan && c.plan[d.f] !== e.target.value) { c.plan[d.f] = e.target.value; fetch("/api/create-edit", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: d.cedit, [d.f]: e.target.value})}); }
+  }
+});
+
 document.addEventListener("change", e => {
   if (e.target.id === "liveSort") { liveSort = e.target.value; renderLive(true); }
 });
@@ -780,6 +886,25 @@ document.addEventListener("click", async e => {
     return;
   }
   if (t.id === "liveRefresh") return api("/api/live-refresh");
+  if (d.ckind && !demo) { const ask = $("#cAsk").value; cKind = d.ckind; $("#cForm").innerHTML = createForm(); $("#cAsk").value = ask; return; }
+  if (d.clen) { cLen = +d.clen; t.parentElement.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c === t)); return; }
+  if (d.cex) { $("#cAsk").value = d.cex; $("#cAsk").focus(); return; }
+  if (t.id === "cPlan") {
+    const ask = $("#cAsk").value.trim();
+    if (ask.length < 4) { toast("Type a few words about the video first."); return $("#cAsk").focus(); }
+    t.disabled = true; t.textContent = "Writing the plan…";
+    const j = await api("/api/create-plan", {kind: cKind, ask, duration: cLen, book_id: $("#cBook")?.value, use_cover: $("#cCover") ? $("#cCover").checked : false});
+    if (j.ok) { $("#cAsk").value = ""; toast("Plan ready. Check it on the right, then press Make it."); }
+    t.disabled = false; t.textContent = "✍️ Plan it · shows the price first";
+    return renderCreate(false);
+  }
+  if (d.cmake) {
+    const j = await api("/api/create-make", {id: d.cmake});
+    if (j.need_key) openSheet("settings");
+    return;
+  }
+  if (d.cdel) return api("/api/create-delete", {id: d.cdel});
+  if (d.cplay) { const c = (S.creations || []).find(x => x.id === d.cplay); if (c) t.outerHTML = `<div class="thumb"><video src="${c.video_url}" controls autoplay playsinline></video></div>`; return; }
   if (t.id === "demoBtn") { if (tab !== "floor") setTab("floor"); return demoStart(); }
   if (demo) {
     if (d.demo === "exit") return demoExit();
@@ -790,6 +915,7 @@ document.addEventListener("click", async e => {
     if (d.open) { const k = DEMO_STEPS.findIndex(x => x[0] === d.open); if (k >= 0) { demo.i = k; demo.play = false; demoShow(); } }
     return;  // nothing real can be pressed during the demo
   }
+  if (d.gocreate) { closeSheet(); return setTab("create"); }
   if (d.open) return openSheet(d.open);
   if (t.hasAttribute("data-close")) return closeSheet();
   if (d.act === "settings" || t.id === "settingsBtn") return openSheet("settings");

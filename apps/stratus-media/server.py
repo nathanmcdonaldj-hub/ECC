@@ -117,6 +117,7 @@ def blank_state():
         "sales": {"imported_at": None, "file": None, "rows": []},
         "stats": {"fetched_at": None, "data": None},
         "ugc": [],          # UGC briefs
+        "creations": [],    # Create tab videos (Higgsfield API)
         "chat": {"model": None, "messages": [], "started": None},
         "pending_actions": {},
         "settings": {},
@@ -1375,6 +1376,7 @@ def build_state(for_model=False):
     out.update({
         "books": STATE["books"],
         "ugc": STATE["ugc"][-20:],
+        "creations": [create_public(c) for c in STATE.get("creations", [])[-20:]][::-1],
         "music": list_music(),
         "music_ready": bool(find_ffmpeg()),
         "chat_model": STATE["chat"].get("model") or CONFIG["default_model"],
@@ -1384,7 +1386,7 @@ def build_state(for_model=False):
         "settings": {
             "has_anthropic_key": bool(sec.get("anthropic_key")),
             "has_upload_post_key": bool(sec.get("upload_post_key")),
-            "has_higgsfield_key": bool(sec.get("higgsfield_key")),
+            "has_higgsfield_key": bool(hf_key()),
             "profile": CONFIG["upload_post_profile"],
             "dry_run": CONFIG.get("dry_run_posting", False),
         },
@@ -1963,6 +1965,8 @@ def r_settings(d):
         if field in d and d[field] is not None and str(d[field]).strip():
             save_secret(field, d[field])
             resolve_errors("claude:" if field == "anthropic_key" else "post:")
+            if field == "higgsfield_key":
+                threading.Thread(target=reprice_plans, daemon=True).start()
     if d.get("clear"):
         save_secret(d["clear"], "")
     return {"ok": True, "message": "Saved. Keys stay hidden."}
@@ -2077,6 +2081,321 @@ def add_ugc_video(path, q):
     return {"ok": True, "message": "Sent to Your Desk for your OK."}
 
 
+
+# ---------------------------------------------------------------- Create (Higgsfield API)
+# Uses Mr. McDonald's Higgsfield API key (console.higgsfield.ai, prepaid USD balance).
+# Nothing is spent until he presses "Make it" after seeing the price.
+
+HF_API = "https://api.higgsfield.ai"
+HF_MODEL = "kling-video/v2.6/pro"
+CREATE_THREADS = {}
+
+CREATE_SYSTEM = (
+    "You turn Mr. McDonald's plain-words video idea into a plan for an AI video generator (Kling). "
+    "His brand is Stratus House. He sells coloring books on Amazon KDP and posts short vertical videos. "
+    "Reply with JSON only, no other text: {\"title\": short name (max 6 words), "
+    "\"prompt\": one detailed paragraph for the video model (subject, action, setting, camera move, lighting, "
+    "realistic phone-footage look for UGC; vertical 9:16; NO on-screen text, captions, logos or watermarks; "
+    "describe only what is visible), \"caption\": a post caption with a hook in the first line and a short call to action, "
+    "\"hashtags\": 3-5 hashtags in one string}. Keep it to one continuous shot that fits the length.")
+
+
+def hf_key():
+    k = (secrets().get("higgsfield_key") or "").strip()
+    return k if ":" in k else ""
+
+
+class HFError(Exception):
+    def __init__(self, code, detail=""):
+        super().__init__(detail)
+        self.code, self.detail = code, detail
+
+
+def hf_call(method, path_or_url, body=None, idem=None, timeout=60):
+    key = hf_key()
+    if not key:
+        raise HFError("nokey")
+    url = path_or_url if path_or_url.startswith("http") else HF_API + path_or_url
+    headers = {"Authorization": "Key " + key, "Accept": "application/json"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if idem:
+        headers["Idempotency-Key"] = idem
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8") or "{}"
+            return json.loads(raw)
+    except urllib.error.HTTPError as exc:
+        raise HFError(exc.code, exc.read().decode("utf-8", "replace")[:300])
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise HFError("net", str(exc))
+
+
+def hf_plain(exc):
+    """Higgsfield problems in plain words."""
+    if exc.code == "nokey":
+        return "Your Higgsfield API key isn't saved yet. Open Settings and add it."
+    if exc.code == "net":
+        return "Couldn't reach Higgsfield. Check your Wi-Fi and try again."
+    if exc.code in (401, 403):
+        return "Higgsfield didn't accept the API key. Open Settings and paste it again."
+    if exc.code == 402 or "balance" in exc.detail.lower() or "credit" in exc.detail.lower():
+        return "Your Higgsfield API balance is too low. Add money at console.higgsfield.ai (Billing), then try again."
+    if exc.code == 429:
+        return "Higgsfield is busy. Wait a minute and try again."
+    if isinstance(exc.code, int) and exc.code >= 500:
+        return "Higgsfield's servers are having trouble. Nothing was charged. Try again in a few minutes."
+    return "Higgsfield said no (error {}): {}".format(exc.code, exc.detail[:160])
+
+
+def hf_body(c):
+    body = {"prompt": c["plan"]["prompt"], "duration": c.get("duration", 5), "cfg_scale": 0.5, "sound": "off"}
+    if c.get("image_url"):
+        body["image_url"] = c["image_url"]
+    else:
+        body["aspect_ratio"] = "9:16"
+    return body
+
+
+def hf_endpoint(c):
+    return HF_MODEL + ("/image-to-video" if c.get("use_cover") else "/text-to-video")
+
+
+def hf_upload_cover(path):
+    ctype = mimetypes.guess_type(path)[0] or "image/jpeg"
+    up = hf_call("POST", "/files/generate-upload-url", {"content_type": ctype})
+    with open(path, "rb") as fh:
+        data = fh.read()
+    hdrs = dict(up.get("upload_headers") or {})
+    hdrs.setdefault("Content-Type", ctype)
+    req = urllib.request.Request(up["upload_url"], data=data, headers=hdrs, method="PUT")
+    try:
+        with urllib.request.urlopen(req, timeout=120):
+            pass
+    except urllib.error.HTTPError as exc:
+        raise HFError(exc.code, "cover upload failed")
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise HFError("net", str(exc))
+    return up["public_url"]
+
+
+def hf_estimate(c):
+    """Exact USD price from Higgsfield (same for start-from-cover)."""
+    try:
+        body = {"prompt": c["plan"]["prompt"], "duration": c.get("duration", 5), "cfg_scale": 0.5, "sound": "off", "aspect_ratio": "9:16"}
+        usd = hf_call("POST", "/estimate/" + HF_MODEL + "/text-to-video", body, timeout=30).get("usd")
+        return float(usd) if usd is not None else None
+    except (HFError, ValueError, TypeError):
+        return None
+
+
+def reprice_plans():
+    for c in STATE.get("creations", []):
+        if c.get("status") in ("plan", "failed") and c.get("usd") is None:
+            c["usd"] = hf_estimate(c)
+    persist()
+
+
+def _parse_plan(text):
+    m = re.search(r"\{.*\}", text, re.S)
+    if not m:
+        raise ValueError("no json")
+    plan = json.loads(m.group(0))
+    for k in ("prompt", "caption"):
+        if not str(plan.get(k) or "").strip():
+            raise ValueError("missing " + k)
+    plan.setdefault("title", "New video")
+    plan.setdefault("hashtags", "")
+    return {k: str(plan[k]).strip() for k in ("title", "prompt", "caption", "hashtags")}
+
+
+def create_public(c):
+    out = {k: c.get(k) for k in ("id", "kind", "ask", "book", "duration", "use_cover", "usd", "status",
+                                 "error", "created", "done_at", "clip_id")}
+    out["plan"] = c.get("plan")
+    if c.get("file"):
+        out["video_url"] = "/ugc-file?f=" + urllib.parse.quote(os.path.basename(c["file"]))
+    return out
+
+
+def r_create_plan(d):
+    ask = (d.get("ask") or "").strip()
+    if len(ask) < 4:
+        return {"ok": False, "message": "Type a few words about the video you want."}
+    kind = "promo" if d.get("kind") == "promo" else "original"
+    duration = 10 if str(d.get("duration")) == "10" else 5
+    book = None
+    if kind == "promo":
+        with LOCK:
+            book = next((b for b in STATE["books"] if b["id"] == d.get("book_id")), None)
+        if not book:
+            return {"ok": False, "message": "Pick which coloring book this promo is for (add one in the UGC Director first)."}
+    use_cover = bool(book and book.get("cover") and d.get("use_cover", True))
+    user = "Video type: {}.\nLength: {} seconds.\nHis idea: {}".format(
+        "UGC promo for his coloring book “{}”{}".format(
+            book["title"], " (the video starts from a photo of the book cover; describe how the scene moves from it)"
+            if use_cover else "") if book else "original short video for his channels",
+        duration, ask[:1500])
+    try:
+        resp = call_claude({"max_tokens": 1200, "system": CREATE_SYSTEM,
+                            "messages": [{"role": "user", "content": user}]},
+                           STATE["chat"].get("model") or CONFIG["default_model"])
+        plan = _parse_plan(text_of(resp.get("content", [])))
+    except ClaudeError as exc:
+        claude_error_to_alert("UGC Director", exc)
+        return {"ok": False, "message": "Your manager couldn't write the plan. See the alert at the top."}
+    except (ValueError, KeyError, TypeError):
+        return {"ok": False, "message": "The plan came back garbled. Press Plan it again."}
+    if book and book.get("amazon_url"):
+        plan["caption"] += "\n" + book["amazon_url"]
+    c = {"id": uuid.uuid4().hex[:8], "kind": kind, "ask": ask, "duration": duration,
+         "book_id": book["id"] if book else None, "book": book["title"] if book else None,
+         "use_cover": use_cover, "plan": plan, "status": "plan", "created": now_iso()}
+    c["usd"] = hf_estimate(c) if hf_key() else None
+    with LOCK:
+        STATE.setdefault("creations", []).append(c)
+        STATE["creations"] = STATE["creations"][-40:]
+        persist()
+    return {"ok": True, "creation": create_public(c)}
+
+
+def r_create_edit(d):
+    with LOCK:
+        c = next((x for x in STATE.get("creations", []) if x["id"] == d.get("id")), None)
+        if not c or c["status"] not in ("plan", "failed"):
+            return {"ok": False, "message": "That video can't be changed now."}
+        if d.get("prompt"):
+            c["plan"]["prompt"] = str(d["prompt"]).strip()[:2500]
+        if d.get("caption") is not None:
+            c["plan"]["caption"] = str(d["caption"]).strip()[:2200]
+        persist()
+    return {"ok": True}
+
+
+def r_create_make(d):
+    if not hf_key():
+        return {"ok": False, "message": "Add your Higgsfield API key in Settings first.", "need_key": True}
+    with LOCK:
+        c = next((x for x in STATE.get("creations", []) if x["id"] == d.get("id")), None)
+        if not c:
+            return {"ok": False, "message": "That plan is gone. Make a new one."}
+        if c["status"] in ("submitting", "making", "done"):
+            return {"ok": False, "message": "That one is already being made."}
+        c["status"], c["error"] = "submitting", None
+        c.pop("request_id", None)
+        c.pop("status_url", None)
+        c["attempt"] = c.get("attempt", 0) + 1
+        persist()
+    threading.Thread(target=_create_run, args=(c,), daemon=True).start()
+    return {"ok": True, "message": "Making it now. It takes about 2 to 6 minutes, then it lands at Your Desk."}
+
+
+def r_create_delete(d):
+    with LOCK:
+        before = len(STATE.get("creations", []))
+        STATE["creations"] = [x for x in STATE.get("creations", [])
+                              if not (x["id"] == d.get("id") and x["status"] not in ("submitting", "making"))]
+        persist()
+        return {"ok": len(STATE["creations"]) < before}
+
+
+def _create_fail(c, msg):
+    with LOCK:
+        c["status"], c["error"] = "failed", msg
+        persist()
+    notify_mac("Stratus House · Create", "A video didn't finish: " + msg[:120])
+
+
+def _create_run(c):
+    try:
+        if not c.get("request_id"):
+            if c.get("use_cover") and not c.get("image_url"):
+                with LOCK:
+                    book = next((b for b in STATE["books"] if b["id"] == c.get("book_id")), None)
+                if book and book.get("cover") and os.path.exists(book["cover"]):
+                    c["image_url"] = hf_upload_cover(book["cover"])
+                else:
+                    c["use_cover"] = False
+            r = hf_call("POST", "/" + hf_endpoint(c), hf_body(c), idem="stratus-{}-{}".format(c["id"], c["attempt"]))
+            with LOCK:
+                c["request_id"], c["status_url"] = r.get("request_id"), r.get("status_url")
+                c["status"] = "making"
+                persist()
+        _create_poll(c)
+    except HFError as exc:
+        _create_fail(c, hf_plain(exc))
+    except Exception as exc:  # never kill the server over one video
+        traceback.print_exc()
+        _create_fail(c, "Something unexpected went wrong ({}).".format(str(exc)[:80]))
+
+
+def _create_poll(c):
+    url = c.get("status_url") or "{}/requests/{}/status".format(HF_API, c["request_id"])
+    wait, started = 2.0, time.time()
+    while time.time() - started < 40 * 60:
+        time.sleep(wait)
+        wait = min(wait * 1.5, 10.0)
+        try:
+            r = hf_call("GET", url, timeout=30)
+        except HFError as exc:
+            if exc.code in ("net", 429) or (isinstance(exc.code, int) and exc.code >= 500):
+                wait = 20.0
+                continue
+            raise
+        st = r.get("status")
+        if st == "completed":
+            vurl = (r.get("video") or {}).get("url")
+            if not vurl:
+                raise HFError("x", "finished but no video link came back")
+            return _create_save(c, vurl)
+        if st in ("failed", "nsfw", "canceled"):
+            return _create_fail(c, {"nsfw": "Higgsfield's safety filter blocked it. Nothing was charged. Reword the idea and try again.",
+                                    "canceled": "It was canceled. Nothing was charged."}.get(
+                st, "Higgsfield couldn't make this one. Nothing was charged. Press Try again."))
+    _create_fail(c, "It took over 40 minutes, so I stopped waiting. Press Try again.")
+
+
+def _create_save(c, vurl):
+    os.makedirs(CONFIG["ugc_dir"], exist_ok=True)
+    slug = re.sub(r"[^\w\-]+", "-", c["plan"]["title"]).strip("-")[:40] or "video"
+    dest = os.path.join(CONFIG["ugc_dir"], "{}-{}.mp4".format(slug, c["id"]))
+    tmp = dest + ".part"
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(vurl, timeout=300) as resp, open(tmp, "wb") as fh:
+                shutil.copyfileobj(resp, fh, 1048576)
+            break
+        except (urllib.error.URLError, TimeoutError, OSError):
+            if attempt == 2:
+                return _create_fail(c, "The video was made but the download failed. It's kept at Higgsfield for 7 days. Press Try again.")
+            time.sleep(10)
+    os.replace(tmp, dest)
+    cid = "UGC/" + os.path.basename(dest)
+    with LOCK:
+        STATE["clips"][cid] = {
+            "id": cid, "source": "UGC", "file": dest, "thumb": None, "num": 0,
+            "notes": ("Promo for " + c["book"]) if c.get("book") else ("Original: " + c["plan"]["title"]),
+            "mtime": time.time(), "status": "ready",
+            "caption": c["plan"]["caption"], "hashtags": c["plan"]["hashtags"],
+            "platforms": ["instagram", "youtube", "tiktok"], "time": suggest_time(0),
+            "why": "Evenings get the most traffic.", "music": "auto", "added": now_iso(),
+        }
+        c.update(status="done", file=dest, clip_id=cid, done_at=now_iso())
+        persist()
+    notify_mac("Stratus House · Create", "Your video “{}” is ready at Your Desk.".format(c["plan"]["title"]))
+
+
+def resume_creations():
+    for c in STATE.get("creations", []):
+        if c.get("status") in ("submitting", "making") and c.get("request_id"):
+            c["status"] = "making"
+            threading.Thread(target=_create_run, args=(c,), daemon=True).start()
+        elif c.get("status") == "submitting":
+            c["status"], c["error"] = "failed", "The dashboard restarted before it started. Nothing was charged. Press Try again."
+
 ROUTES = {
     "/api/live-refresh": r_live_refresh,
     "/api/clip-gate": r_clip_gate,
@@ -2099,6 +2418,10 @@ ROUTES = {
     "/api/test-claude": r_test_claude,
     "/api/book": r_book,
     "/api/ugc-brief": r_ugc_brief,
+    "/api/create-plan": r_create_plan,
+    "/api/create-edit": r_create_edit,
+    "/api/create-make": r_create_make,
+    "/api/create-delete": r_create_delete,
 }
 
 
@@ -2117,6 +2440,7 @@ def main():
         except OSError:
             pass
     scan_clips()
+    resume_creations()
     persist()
     threading.Thread(target=background_loop, daemon=True).start()
     port = int(os.environ.get("STRATUS_PORT") or CONFIG["port"])
