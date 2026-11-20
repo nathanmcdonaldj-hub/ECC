@@ -113,7 +113,7 @@ def facecam_rect(boxes, seen):
 
 # Stream overlays live at the edges: chat (left or right), sub alerts (top), taskbar (bottom).
 # Keep only the middle of the picture. Override with HIDE_CROP="x,y,w,h" (fractions).
-CROP = tuple(float(v) for v in os.environ.get("HIDE_CROP", "0.14,0.07,0.72,0.84").split(","))
+CROP = tuple(float(v) for v in os.environ.get("HIDE_CROP", "0.20,0.07,0.60,0.84").split(","))
 
 
 def crop_filter(vw, vh):

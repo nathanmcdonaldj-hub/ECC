@@ -445,6 +445,10 @@ def scan_clips():
                        "time": suggest_time(sum(1 for r in STATE["clips"].values() if r.get("status") in ("new", "ready"))),
                        "why": "", "music": "auto", "added": now_iso()}
                 STATE["clips"][cid] = rec
+            elif rec.get("status") == "skipped" and info["mtime"] > (rec.get("mtime") or 0) + 5:
+                # same name, but a freshly re-made file: treat it as a new clip
+                rec.update({"status": "new", "caption": "", "hashtags": "", "why": "", "added": now_iso()})
+                rec.pop("skipped_at", None)
             rec.update({k: info[k] for k in ("id", "source", "file", "thumb", "num", "notes", "mtime")})
             rec["missing"] = False
         for cid, rec in STATE["clips"].items():
