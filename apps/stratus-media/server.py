@@ -1476,7 +1476,9 @@ RUN = {"proc": None, "queue_before": None, "cool_until": 0.0, "stopped": True}
 def _external_run():
     """A clipping run started outside this process (e.g. before a dashboard restart)."""
     try:
-        r = subprocess.run(["/usr/bin/pgrep", "-f", os.path.basename(CONFIG["night_run"])],
+        # Only a shell actually running the script counts (not an editor or a grep that mentions it).
+        pat = r"^(/bin/|/usr/bin/)?(ba|z)?sh [^ ]*" + re.escape(os.path.basename(CONFIG["night_run"]))
+        r = subprocess.run(["/usr/bin/pgrep", "-f", pat],
                            capture_output=True, text=True, timeout=5)
         return r.returncode == 0 and bool(r.stdout.strip())
     except Exception:  # noqa: BLE001
