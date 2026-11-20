@@ -584,7 +584,7 @@ const AFTER = {
   settings: () => {
     $("#kSave").onclick = () => {
       const id = $("#kHfId").value.trim(), sec = $("#kHfSecret").value.trim();
-      if ((id && !sec) || (!id && sec)) return toast("Higgsfield needs both the Key ID and the Secret.");
+      if ((id && !sec && !id.includes(":")) || (!id && sec)) return toast("Higgsfield needs both the Key ID and the Secret.");
       api("/api/settings", {anthropic_key: $("#kClaude").value, upload_post_key: $("#kUpload").value, higgsfield_key: id && sec ? (id.includes(":") ? id : id + ":" + sec) : ""});
     };
     $("#kTest").onclick = () => api("/api/test-claude");
