@@ -3,7 +3,8 @@
 (it already has ffmpeg, opencv, mediapipe and torch; the stratus-hide image adds demucs).
 
   hide_streamer.py face  SOURCE.mp4 OUT.mp4 [--report r.json]
-      Finds a static facecam (webcam inset) and covers it with a heavy blur. Audio is kept,
+      Finds a static facecam (webcam inset), covers it with a heavy blur and crops off the edges
+      where stream overlays sit (chat, sub alerts, taskbar). Audio is kept,
       so OpenShorts can still transcribe and pick moments. Exit code 0 = covered or no face,
       3 = the streamer fills the screen (can't be hidden by covering), anything else = error.
 
@@ -94,7 +95,7 @@ def facecam_rect(boxes, seen):
         return None, "fullframe"   # IRL / just chatting: he IS the picture
     # a webcam shows head + shoulders: grow the face box into the inset
     cx, cy = x + w / 2, y + h / 2
-    W, H = w * 3.0, h * 3.4
+    W, H = w * 3.8, h * 4.2   # generous: webcam frames are wider than the head (no room strip left over)
     rx, ry = cx - W / 2, cy - H * 0.42
     # snap to the nearest edges when close (insets usually sit in a corner)
     if rx < 0.12:
@@ -110,6 +111,23 @@ def facecam_rect(boxes, seen):
     return (rx, ry, W, H), "facecam"
 
 
+# Stream overlays live at the edges: chat (left or right), sub alerts (top), taskbar (bottom).
+# Keep only the middle of the picture. Override with HIDE_CROP="x,y,w,h" (fractions).
+CROP = tuple(float(v) for v in os.environ.get("HIDE_CROP", "0.14,0.07,0.72,0.84").split(","))
+
+
+def crop_filter(vw, vh):
+    x, y, w, h = CROP
+    W, H = int(vw * w) // 2 * 2, int(vh * h) // 2 * 2
+    return "crop={}:{}:{}:{}".format(W, H, int(vw * x) // 2 * 2, int(vh * y) // 2 * 2)
+
+
+def encode(src, dst, filter_complex, vmap):
+    run(["nice", "-n", "15", FFMPEG, "-y", "-loglevel", "error", "-i", src, "-filter_complex", filter_complex,
+         "-map", vmap, "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+         "-pix_fmt", "yuv420p", "-threads", "3", "-c:a", "copy", "-movflags", "+faststart", dst], timeout=7200)
+
+
 def cover(src, dst, rect, vw, vh):
     x, y, w, h = rect
     X, Y = int(x * vw) // 2 * 2, int(y * vh) // 2 * 2
@@ -117,10 +135,9 @@ def cover(src, dst, rect, vw, vh):
     Wp, Hp = min(Wp, vw - X), min(Hp, vh - Y)
     r = max(8, min(Wp, Hp) // 5)
     fc = ("[0:v]split[a][b];[b]crop={W}:{H}:{X}:{Y},scale=iw/8:-2,boxblur={r2}:4,scale={W}:{H},boxblur={r}:3[m];"
-          "[a][m]overlay={X}:{Y}[v]").format(W=Wp, H=Hp, X=X, Y=Y, r=r, r2=max(2, r // 8))
-    run(["nice", "-n", "15", FFMPEG, "-y", "-loglevel", "error", "-i", src, "-filter_complex", fc,
-         "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-         "-pix_fmt", "yuv420p", "-threads", "3", "-c:a", "copy", "-movflags", "+faststart", dst], timeout=7200)
+          "[a][m]overlay={X}:{Y},{crop}[v]").format(W=Wp, H=Hp, X=X, Y=Y, r=r, r2=max(2, r // 8),
+                                                     crop=crop_filter(vw, vh))
+    encode(src, dst, fc, "[v]")
     return {"x": X, "y": Y, "w": Wp, "h": Hp}
 
 
@@ -133,8 +150,8 @@ def stage_face(src, dst, report=None):
         result["rect"] = cover(src, dst, rect, vw, vh)
         log("facecam covered at {}".format(result["rect"]))
     elif kind == "noface":
-        shutil.copyfile(src, dst)
-        log("no steady face found; nothing to cover")
+        encode(src, dst, "[0:v]{}[v]".format(crop_filter(vw, vh)), "[v]")
+        log("no steady face found; edges with chat/alerts cropped off")
     if report:
         with open(report, "w") as fh:
             json.dump(result, fh)

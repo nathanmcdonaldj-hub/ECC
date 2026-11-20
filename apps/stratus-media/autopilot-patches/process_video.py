@@ -335,6 +335,8 @@ def main():
         finally:
             shutil.rmtree(work, ignore_errors=True)   # source copies still have his voice
         body["layouts"] = ["none"]   # plain crop: no camera band / split layout
+        body["captions"] = False     # no burned-in subtitles of his speech: he writes his own caption
+        body["auto_hook"] = False    # no hook title card either
     elif is_url:
         body["url"] = video
     else:
