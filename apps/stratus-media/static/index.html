@@ -963,7 +963,7 @@ async function copyText(s) {
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 
 setTab(tab);
-refresh();
+refresh().then(() => { if (location.hash === "#settings" && S) { history.replaceState(null, "", "/"); openSheet("settings"); } });
 setInterval(() => { if (!busy && !document.hidden) refresh(); }, 15000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) refresh(); });
 </script>
