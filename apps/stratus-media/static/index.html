@@ -545,8 +545,8 @@ const SHEETS = {
   settings: () => `
     <div class="box"><label class="f">Claude API key (from your trading desk) ${S.settings.has_anthropic_key ? "✅ saved" : "⚠️ not saved"}<input type="password" id="kClaude" placeholder="${S.settings.has_anthropic_key ? "Saved · paste a new one to replace" : "Paste key"}" autocomplete="off"></label>
       <label class="f">Upload-Post key ${S.settings.has_upload_post_key ? "✅ saved" : "⚠️ not saved"}<input type="password" id="kUpload" placeholder="${S.settings.has_upload_post_key ? "Saved · paste a new one to replace" : "Paste key"}" autocomplete="off"></label>
-      <label class="f">Higgsfield API key ID ${S.settings.has_higgsfield_key ? "✅ saved" : "⚠️ not saved · needed for the Create tab"}<input type="password" id="kHfId" placeholder="${S.settings.has_higgsfield_key ? "Saved · paste a new one to replace" : "Paste the Key ID"}" autocomplete="off"></label>
-      <label class="f">Higgsfield API key secret<input type="password" id="kHfSecret" placeholder="Paste the Secret" autocomplete="off"></label>
+      <label class="f">Higgsfield API key ${S.settings.has_higgsfield_key ? "✅ saved" : "⚠️ not saved · needed for the Create tab"}<input type="password" id="kHfId" placeholder="${S.settings.has_higgsfield_key ? "Saved · paste a new one to replace" : "Paste the Higgsfield API key"}" autocomplete="off"></label>
+      <label class="f">Higgsfield secret (only if Higgsfield gave you a second one)<input type="password" id="kHfSecret" placeholder="Leave empty if you only have one key" autocomplete="off"></label>
       <div class="row"><button class="btn go" id="kSave">Save keys</button><button class="btn sm" id="kTest">Test Claude</button></div>
       <span class="muted" style="font-size:12px">Keys are stored only on this Mac and are never shown again.</span></div>
     <div class="box"><b>Light music library</b><span class="muted" style="font-size:12px">${S.music.length} track(s) in Movies → Stratus Music. Use royalty-free songs only, so posts don't get copyright strikes.</span>
@@ -584,8 +584,8 @@ const AFTER = {
   settings: () => {
     $("#kSave").onclick = () => {
       const id = $("#kHfId").value.trim(), sec = $("#kHfSecret").value.trim();
-      if ((id && !sec && !id.includes(":")) || (!id && sec)) return toast("Higgsfield needs both the Key ID and the Secret.");
-      api("/api/settings", {anthropic_key: $("#kClaude").value, upload_post_key: $("#kUpload").value, higgsfield_key: id && sec ? (id.includes(":") ? id : id + ":" + sec) : ""});
+      if (!id && sec) return toast("Put the Higgsfield key in the first box.");
+      api("/api/settings", {anthropic_key: $("#kClaude").value, upload_post_key: $("#kUpload").value, higgsfield_key: id ? (sec && !id.includes(":") ? id + ":" + sec : id) : ""});
     };
     $("#kTest").onclick = () => api("/api/test-claude");
     $("#addMusic").onclick = () => pickFile("audio/*", f => upload("music", f));
@@ -830,7 +830,7 @@ function createCard(c) {
     ${c.error ? `<span style="color:#ff8a8a;font-size:13px;font-weight:700">${esc(c.error)}</span>` : ""}
     ${editable ? `<details class="pr"><summary>See or tweak the video plan</summary><textarea data-cedit="${c.id}" data-f="prompt" rows="5">${esc(p.prompt)}</textarea></details>
       <label class="f">Caption<textarea data-cedit="${c.id}" data-f="caption" rows="3">${esc(p.caption)}</textarea></label>
-      <div class="row" style="align-items:center">${usd ? "" : `<span class="muted" style="font-size:12px">${S.settings.has_higgsfield_key ? "Price check failed · shown again after you press Make it" : "Price shows once your Higgsfield key is in Settings"}</span>`}
+      <div class="row" style="align-items:center">${usd ? "" : `<span class="muted" style="font-size:12px">${S.settings.has_higgsfield_key ? "About $0.40 to $0.80 for 5 seconds (Higgsfield didn't give an exact price)" : "Price shows once your Higgsfield key is in Settings"}</span>`}
         <button class="btn go" data-cmake="${c.id}" data-usd="${usd || ""}">${c.status === "failed" ? "↻ Try again" : "🎬 Make it"}${usd ? " · " + usd : ""}</button>
         <button class="btn sm bad" data-cdel="${c.id}">Delete</button></div>`
     : c.status === "done" ? `<span class="muted" style="font-size:12px">Caption and hashtags are ready. Approve it at Your Desk. Nothing posts without your OK.</span><div class="row"><button class="btn go sm" data-open="desk">Go to Your Desk</button></div>`

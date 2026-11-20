@@ -1966,7 +1966,11 @@ def r_settings(d):
             save_secret(field, d[field])
             resolve_errors("claude:" if field == "anthropic_key" else "post:")
             if field == "higgsfield_key":
+                ok, note = hf_check_key()
+                if not ok:
+                    return {"ok": False, "message": note}
                 threading.Thread(target=reprice_plans, daemon=True).start()
+                return {"ok": True, "message": "Saved. " + note}
     if d.get("clear"):
         save_secret(d["clear"], "")
     return {"ok": True, "message": "Saved. Keys stay hidden."}
@@ -2101,8 +2105,7 @@ CREATE_SYSTEM = (
 
 
 def hf_key():
-    k = (secrets().get("higgsfield_key") or "").strip()
-    return k if ":" in k else ""
+    return (secrets().get("higgsfield_key") or "").strip()
 
 
 class HFError(Exception):
@@ -2132,6 +2135,19 @@ def hf_call(method, path_or_url, body=None, idem=None, timeout=60):
         raise HFError(exc.code, exc.read().decode("utf-8", "replace")[:300])
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise HFError("net", str(exc))
+
+
+def hf_check_key():
+    """Ask Higgsfield about a made-up request: 404 means the key works, 401/403 means it doesn't. Costs nothing."""
+    try:
+        hf_call("GET", "/requests/00000000-0000-0000-0000-000000000000/status", timeout=15)
+        return True, "Higgsfield accepted the key ✅"
+    except HFError as exc:
+        if exc.code in (401, 403):
+            return False, "Higgsfield didn't accept that key. Copy it again with the Copy API key button and paste it in the first box."
+        if exc.code == "net":
+            return True, "Couldn't reach Higgsfield to test it right now. It will be checked when you make a video."
+        return True, "Higgsfield accepted the key ✅"
 
 
 def hf_plain(exc):
