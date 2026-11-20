@@ -1396,9 +1396,21 @@ def background_loop():
 RUN = {"proc": None, "queue_before": None, "cool_until": 0.0, "stopped": True}
 
 
+def _external_run():
+    """A clipping run started outside this process (e.g. before a dashboard restart)."""
+    try:
+        r = subprocess.run(["/usr/bin/pgrep", "-f", os.path.basename(CONFIG["night_run"])],
+                           capture_output=True, text=True, timeout=5)
+        return r.returncode == 0 and bool(r.stdout.strip())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def clipper_running():
     p = RUN["proc"]
-    return bool(p and p.poll() is None)
+    if p and p.poll() is None:
+        return True
+    return p is None and _external_run()
 
 
 def _redo_pending():
@@ -1460,7 +1472,13 @@ def run_clipper_gate():
             stop_openshorts("clipping closed")
             RUN["proc"] = None
         return
-    if clipper_running() or time.time() < RUN["cool_until"]:
+    if clipper_running():
+        RUN["stopped"] = False  # make sure OpenShorts is shut down once the run ends
+        return
+    if not RUN["stopped"] and RUN["proc"] is None:
+        stop_openshorts("earlier run finished")
+        return
+    if time.time() < RUN["cool_until"]:
         return
     if list_inbox() or _redo_pending():
         start_clipper()
