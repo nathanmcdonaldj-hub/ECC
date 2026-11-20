@@ -45,6 +45,30 @@ button{cursor:pointer}
 .bar h1 small{display:block;font-size:12px;color:var(--mute);font-weight:600}
 .pill{border:0;font-size:12px;font-weight:800;padding:8px 13px;border-radius:999px;background:var(--card);white-space:nowrap}
 .pill.g{background:var(--gold);color:var(--navy)}
+.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);padding-bottom:0}
+.tab{border:0;background:none;color:var(--mute);font-weight:800;font-size:14px;padding:10px 14px;border-bottom:3px solid transparent;cursor:pointer}
+.tab.on{color:var(--ink);border-bottom-color:var(--gold)}
+.livehead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.livehead .tot{display:flex;gap:18px;flex-wrap:wrap;margin-right:auto}
+.livehead .tot b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.livehead select{width:auto}
+.livehead .tot span{font-size:12px;color:var(--mute);font-weight:700}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.post{background:var(--card);border-radius:18px;overflow:hidden;display:flex;flex-direction:column}
+.post .vid{position:relative;height:340px;overflow:hidden;background:#000;display:grid;place-items:center;cursor:pointer;border:0;padding:0;width:100%}
+.post .vid img,.post .vid video{width:100%;height:100%;object-fit:cover;display:block}
+.post .vid .play{position:absolute;width:54px;height:54px;border-radius:50%;background:rgba(3,11,46,.7);border:2px solid var(--gold);color:var(--gold);display:grid;place-items:center;font-size:20px}
+.post .vid .rank{position:absolute;top:8px;left:8px;background:var(--gold);color:var(--navy);font-weight:900;font-size:11px;padding:3px 8px;border-radius:999px}
+.post .body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
+.post .cap{font-size:13px;font-weight:700;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.post .when{font-size:11px;color:var(--mute);font-weight:700}
+.post .nums{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center}
+.post .nums b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
+.post .nums span{font-size:10px;color:var(--mute);font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.post .plats{display:flex;gap:6px;flex-wrap:wrap}
+.post .plat{font-size:11px;font-weight:800;padding:4px 9px;border-radius:999px;background:var(--navy);color:var(--ink);text-decoration:none}
+.post .plat small{color:var(--mute);font-weight:700}
+.empty{background:var(--card);border-radius:18px;padding:28px;text-align:center;color:var(--mute)}
 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .kpi{background:var(--card);border-radius:16px;padding:12px 14px;border:0;text-align:left}
 .kpi .v{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
@@ -174,6 +198,11 @@ body.demo .st.done{opacity:.75}
   </div></div>
   <div class="errs" id="errs"></div>
   <div class="kpis" id="kpis"></div>
+  <nav class="tabs" role="tablist">
+    <button class="tab on" data-tab="floor" role="tab">🏢 Studio Floor</button>
+    <button class="tab" data-tab="live" role="tab">🎬 Live Posts</button>
+  </nav>
+  <div id="floorView">
   <div class="legend">
     <span><i class="dot" style="background:var(--ok)"></i>Working</span>
     <span><i class="dot" style="background:var(--gold)"></i>Waiting on you</span>
@@ -182,6 +211,8 @@ body.demo .st.done{opacity:.75}
   </div>
   <div class="floor" id="floor"></div>
   <p class="muted" style="margin:0">Click any employee to open their station.</p>
+  </div>
+  <div id="liveView" hidden></div>
 </div>
 <div id="demoRoot"></div>
 <div id="sheetRoot"></div>
@@ -331,6 +362,7 @@ function overrideModal() {
 }
 function render() {
   renderGate();
+  renderLive(false);
   document.title = (S.clips_waiting.length ? `(${S.clips_waiting.length}) ` : "") + "Stratus House Media";
   $("#errs").innerHTML = S.errors.map(e => `
     <div class="err" role="alert"><span class="ic">!</span>
@@ -663,6 +695,67 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft" && demo.i > 0) { demo.i--; demoShow(); }
 });
 
+
+/* ---------- Live Posts: every posted clip with its numbers. Videos only load when clicked. ---------- */
+let tab = (() => { try { return localStorage.getItem("tab") || "floor"; } catch (e) { return "floor"; } })();
+let liveSort = "new";
+const PLAT = {instagram: "Instagram", youtube: "YouTube", tiktok: "TikTok"};
+const fmtN = n => n == null ? "–" : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M" : n >= 1e4 ? Math.round(n / 1e3) + "K" : n.toLocaleString();
+function ago(iso) {
+  if (!iso) return "";
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  return m < 60 ? m + " min ago" : m < 1440 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " d ago";
+}
+function postTotals(c) {
+  const t = {views: null, likes: null, comments: null, shares: null};
+  Object.values(c.metrics || {}).forEach(m => Object.keys(t).forEach(k => { if (typeof m[k] === "number") t[k] = (t[k] || 0) + m[k]; }));
+  return t;
+}
+function setTab(t) {
+  tab = t; try { localStorage.setItem("tab", t); } catch (e) {}
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  $("#floorView").hidden = t !== "floor"; $("#liveView").hidden = t !== "live";
+  if (t === "live") renderLive(true);
+}
+let lastLive = "";
+function renderLive(force) {
+  if (tab !== "live" || !S) return;
+  const posts = (S.posted || []).map(c => Object.assign({}, c, {tot: postTotals(c)}));
+  if (liveSort === "views") posts.sort((a, b) => (b.tot.views || 0) - (a.tot.views || 0));
+  const sum = k => posts.reduce((a, p) => a + (p.tot[k] || 0), 0);
+  const updated = posts.map(p => p.metrics_at).filter(Boolean).sort().pop();
+  const top = posts.length ? [...posts].sort((a, b) => (b.tot.views || 0) - (a.tot.views || 0))[0] : null;
+  const html = `<div class="livehead">
+      <div class="tot"><div><b>${posts.length}</b><span>Posts live</span></div><div><b>${fmtN(sum("views"))}</b><span>Views</span></div>
+        <div><b>${fmtN(sum("likes"))}</b><span>Likes</span></div><div><b>${fmtN(sum("comments"))}</b><span>Comments</span></div><div><b>${fmtN(sum("shares"))}</b><span>Shares</span></div></div>
+      <select id="liveSort" aria-label="Sort"><option value="new" ${liveSort === "new" ? "selected" : ""}>Newest first</option><option value="views" ${liveSort === "views" ? "selected" : ""}>Most views first</option></select>
+      <button class="btn sm" id="liveRefresh">↻ Refresh numbers</button></div>
+    <div class="muted" style="font-size:12px">${updated ? "Numbers updated " + ago(updated) + " · they refresh by themselves every 6 hours" : "Numbers show up a few hours after a post goes live"}</div>
+    ${posts.length ? `<div class="gallery">${posts.map(p => {
+      const plats = (p.platforms || []).map(pl => {
+        const m = (p.metrics || {})[pl] || {};
+        const label = PLAT[pl] || pl;
+        const extra = pl === "tiktok" ? " <small>· posted by you</small>" : (typeof m.views === "number" ? ` <small>· ${fmtN(m.views)} views</small>` : "");
+        return m.url ? `<a class="plat" href="${esc(m.url)}" target="_blank" rel="noopener">${label}${extra} ↗</a>` : `<span class="plat">${label}${extra}</span>`;
+      }).join("");
+      return `<div class="post">
+        <button class="vid" data-play="${esc(p.id)}" aria-label="Play clip ${esc(p.num)}">
+          ${p.thumb_url ? `<img src="${p.thumb_url}" alt="" loading="lazy">` : ""}<span class="play">▶</span>
+          ${top && top.id === p.id && (p.tot.views || 0) > 0 ? '<span class="rank">★ Top post</span>' : ""}</button>
+        <div class="body"><div class="cap">${esc(p.caption || ("Clip " + p.num))}</div>
+          <div class="when">Posted ${esc((p.posted_at || "").replace("T", " ").slice(0, 16))}${p.status === "partial" ? " · one platform failed" : ""}</div>
+          <div class="nums"><div><b>${fmtN(p.tot.views)}</b><span>Views</span></div><div><b>${fmtN(p.tot.likes)}</b><span>Likes</span></div>
+            <div><b>${fmtN(p.tot.comments)}</b><span>Comments</span></div><div><b>${fmtN(p.tot.shares)}</b><span>Shares</span></div></div>
+          <div class="plats">${plats}</div></div></div>`;
+    }).join("")}</div>` : `<div class="empty"><b style="color:var(--ink)">No posts live yet</b><br>When you approve a clip and the Courier posts it, it shows up here with its views, likes, comments and shares.</div>`}`;
+  if (!force && html === lastLive) return;   // don't reset a video that is playing
+  if (!force && document.querySelector("#liveView video")) return;
+  lastLive = html; $("#liveView").innerHTML = html;
+}
+document.addEventListener("change", e => {
+  if (e.target.id === "liveSort") { liveSort = e.target.value; renderLive(true); }
+});
+
 /* ---------- clicks ---------- */
 document.addEventListener("click", async e => {
   const t = e.target.closest("button, [data-scrim]");
@@ -680,7 +773,14 @@ document.addEventListener("click", async e => {
     if (j && j.needs_override) overrideModal();
     return;
   }
-  if (t.id === "demoBtn") return demoStart();
+  if (d.tab && !demo) return setTab(d.tab);
+  if (d.play) {
+    const c = (S.posted || []).find(x => x.id === d.play); if (!c) return;
+    t.outerHTML = `<div class="vid"><video src="${c.video_url}" controls autoplay playsinline preload="metadata"></video></div>`;
+    return;
+  }
+  if (t.id === "liveRefresh") return api("/api/live-refresh");
+  if (t.id === "demoBtn") { if (tab !== "floor") setTab("floor"); return demoStart(); }
   if (demo) {
     if (d.demo === "exit") return demoExit();
     if (d.demo === "next") { demo.i++; return demoShow(); }
@@ -736,6 +836,7 @@ async function copyText(s) {
 }
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 
+setTab(tab);
 refresh();
 setInterval(() => { if (!busy && !document.hidden) refresh(); }, 15000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) refresh(); });

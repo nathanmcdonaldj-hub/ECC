@@ -423,7 +423,7 @@ def clip_public(rec):
     out = {k: rec.get(k) for k in (
         "id", "source", "num", "status", "caption", "hashtags", "platforms",
         "time", "why", "music", "notes", "posted_at", "results", "missing",
-        "tiktok_done", "redo")}
+        "tiktok_done", "redo", "metrics", "metrics_at")}
     out["video_url"] = "/media?f=" + urllib.parse.quote(rec["id"])
     out["thumb_url"] = ("/media?thumb=1&f=" + urllib.parse.quote(rec["id"])) if rec.get("thumb") else None
     out["time_nice"] = nice_time(rec.get("time"))
@@ -590,7 +590,8 @@ def post_clip(rec):
                     "Wait until next month, post it by hand, or upgrade Upload-Post to Basic ($24/mo).",
                     key="post:limit")
         return False
-    fields = [("user", CONFIG["upload_post_profile"]), ("title", youtube_title(rec)),
+    req_id = "sh-{}-{}".format(re.sub(r"[^A-Za-z0-9]", "", rec["id"])[-24:], int(time.time()))
+    fields = [("user", CONFIG["upload_post_profile"]), ("request_id", req_id), ("title", youtube_title(rec)),
               ("description", full_caption(rec))]
     for p in platforms:
         fields.append(("platform[]", p))
@@ -600,7 +601,7 @@ def post_clip(rec):
     else:
         body, ctype = multipart(fields, [("video", path)])
         req = urllib.request.Request(UPLOAD_POST_URL, data=body, method="POST", headers={
-            "Authorization": "Apikey " + key, "Content-Type": ctype})
+            "Authorization": "Apikey " + key, "Content-Type": ctype, "X-Request-Id": req_id})
         try:
             with urllib.request.urlopen(req, timeout=600) as resp:
                 result = json.loads(resp.read().decode("utf-8") or "{}")
@@ -618,6 +619,7 @@ def post_clip(rec):
     failed = find_platform_failures(result, platforms)
     with LOCK:
         rec["results"] = result
+        rec["request_id"] = (result.get("request_id") if isinstance(result, dict) else None) or req_id
         ok_platforms = [p for p in platforms if p not in failed]
         if ok_platforms:
             STATE["posts"].append({"id": rec["id"], "platforms": ok_platforms,
@@ -698,6 +700,55 @@ def fetch_stats():
         STATE["stats"] = {"fetched_at": now_iso(), "data": data}
         persist()
     resolve_errors("stats:")
+
+
+POST_ANALYTICS_URL = "https://api.upload-post.com/api/uploadposts/post-analytics/{}"
+METRIC_KEYS = ("views", "likes", "comments", "shares", "saves")
+
+
+def fetch_post_stats(max_age_days=60):
+    """Per-video numbers (views, likes, comments, shares) for every clip posted in the last 60 days."""
+    key = secrets().get("upload_post_key")
+    if not key:
+        return 0
+    cutoff = (now() - timedelta(days=max_age_days)).strftime("%Y-%m-%d")
+    with LOCK:
+        recs = [r for r in STATE["clips"].values() if r.get("request_id")
+                and r.get("status") in ("posted", "partial") and (r.get("posted_at") or "") >= cutoff]
+    done = 0
+    for rec in recs:
+        url = POST_ANALYTICS_URL.format(urllib.parse.quote(rec["request_id"]))
+        req = urllib.request.Request(url, headers={"Authorization": "Apikey " + key})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                continue  # not visible yet; next round
+            raise_error("Analyst", "Couldn't get numbers for your posts",
+                        "Upload-Post's per-post stats answered with error {}.".format(exc.code),
+                        "Nothing to do. I'll try again in 6 hours. Your posts are fine.", key="stats:post")
+            return done
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            return done  # offline: try later
+        metrics = {}
+        for plat, info in ((data or {}).get("platforms") or {}).items():
+            if not isinstance(info, dict):
+                continue
+            pm = info.get("post_metrics") or {}
+            metrics[plat] = {k: pm.get(k) for k in METRIC_KEYS if isinstance(pm.get(k), (int, float))}
+            metrics[plat]["url"] = info.get("post_url")
+            if info.get("post_metrics_error"):
+                metrics[plat]["note"] = str(info["post_metrics_error"])[:120]
+        with LOCK:
+            rec["metrics"] = metrics
+            rec["metrics_at"] = now_iso()
+        done += 1
+        time.sleep(1)  # stay far below Upload-Post's 100 requests / 5 minutes
+    if done:
+        persist()
+        resolve_errors("stats:post")
+    return done
 
 
 def summarize_stats():
@@ -1311,7 +1362,7 @@ def build_state(for_model=False):
         "clips_waiting": waiting,
         "clips_scheduled": scheduled,
         "tiktok": tiktok,
-        "posted": posted[:30],
+        "posted": posted[:120],
         "redo": redo,
         "errors": errors,
         "posts_used": used,
@@ -1383,6 +1434,7 @@ def background_loop():
                 last_stats = time.time()
                 if STATE["posts"]:
                     fetch_stats()
+                    fetch_post_stats()
             persist()
         except Exception:  # noqa: BLE001 - the loop must keep running
             sys.stderr.write("[StratusMedia] loop error\n" + traceback.format_exc())
@@ -1888,6 +1940,17 @@ def r_retry(d):
     return {"ok": False, "message": "Nothing to retry."}
 
 
+LAST_POST_REFRESH = {"t": 0.0}
+
+
+def r_live_refresh(d):
+    if time.time() - LAST_POST_REFRESH["t"] < 600:
+        return {"ok": True, "message": "Numbers were refreshed in the last 10 minutes. Try again a bit later."}
+    LAST_POST_REFRESH["t"] = time.time()
+    threading.Thread(target=lambda: (fetch_stats(), fetch_post_stats()), daemon=True).start()
+    return {"ok": True, "message": "Getting fresh numbers from Instagram and YouTube. Give it a minute."}
+
+
 def r_clip_gate(d):
     action = d.get("action")
     if action not in ("open", "close"):
@@ -2015,6 +2078,7 @@ def add_ugc_video(path, q):
 
 
 ROUTES = {
+    "/api/live-refresh": r_live_refresh,
     "/api/clip-gate": r_clip_gate,
     "/api/link": r_link,
     "/api/approve": r_approve,
