@@ -512,6 +512,8 @@ def pick_auto_track(rec):
 
 _VOICES = None
 VOICE_PREF = ("Samantha", "Daniel", "Karen", "Moira", "Alex", "Tessa", "Fred")
+VOICE_SKIP = ("Bad News", "Good News", "Bahh", "Bells", "Boing", "Bubbles", "Cellos", "Jester",
+              "Organ", "Superstar", "Trinoids", "Whisper", "Wobble", "Zarvox")
 
 
 def list_voices():
@@ -526,7 +528,7 @@ def list_voices():
             res = subprocess.run([say, "-v", "?"], capture_output=True, text=True, timeout=20)
             for line in res.stdout.splitlines():
                 m = re.match(r"^(.+?)\s{2,}(en_[A-Za-z]+)\s", line)
-                if m:
+                if m and m.group(1).strip() not in VOICE_SKIP:
                     names.append(m.group(1).strip())
         except (OSError, subprocess.SubprocessError):
             names = []
@@ -591,7 +593,7 @@ def mix_music(rec):
         vfile = make_voice(line, rec.get("voice"), base + ".voice.aiff")
         vi = len(inputs) // 2
         inputs += ["-i", vfile]
-        parts.append("[{}:a]aresample=48000,adelay=400|400,volume=1.8,asplit=2[vo][vkey]".format(vi))
+        parts.append("[{}:a]aresample=48000,adelay=400|400,volume=1.8,apad,asplit=2[vo][vkey]".format(vi))
         parts.append("[0:a][vkey]sidechaincompress=threshold=0.02:ratio=10:attack=20:release=350[orig]")
         orig = "[orig]"
         mix.append("[vo]")
