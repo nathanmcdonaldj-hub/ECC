@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Hide a streamer in Stratus House clips. Runs inside the OpenShorts backend container
+(it already has ffmpeg, opencv, mediapipe and torch; the stratus-hide image adds demucs).
+
+  hide_streamer.py face  SOURCE.mp4 OUT.mp4 [--report r.json]
+      Finds a static facecam (webcam inset) and covers it with a heavy blur. Audio is kept,
+      so OpenShorts can still transcribe and pick moments. Exit code 0 = covered or no face,
+      3 = the streamer fills the screen (can't be hidden by covering), anything else = error.
+
+  hide_streamer.py voice CLIP.mp4 OUT.mp4
+      Removes the voice (demucs two-stem split) and keeps game/background sound. If the split
+      fails, the clip is muted instead, so his voice never slips through.
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+FFMPEG = os.environ.get("FFMPEG", shutil.which("ffmpeg") or "ffmpeg")
+FFPROBE = os.environ.get("FFPROBE", shutil.which("ffprobe") or "ffprobe")
+
+
+def log(msg):
+    sys.stderr.write("[HideStreamer] {}\n".format(msg))
+
+
+def run(cmd, timeout=3600):
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if p.returncode != 0:
+        raise RuntimeError("{} failed: {}".format(os.path.basename(cmd[0]), p.stderr[-600:]))
+    return p.stdout
+
+
+def probe(path):
+    out = json.loads(run([FFPROBE, "-v", "error", "-select_streams", "v:0", "-show_entries",
+                          "stream=width,height:format=duration", "-of", "json", path]))
+    st = out["streams"][0]
+    return int(st["width"]), int(st["height"]), float(out["format"]["duration"])
+
+
+# ---------------------------------------------------------------- facecam
+
+def face_boxes(path, duration, samples=48):
+    """Normalized face boxes (x, y, w, h) from frames spread across the video."""
+    import cv2
+    import mediapipe as mp
+    cap = cv2.VideoCapture(path)
+    boxes, seen = [], 0
+    det = mp.solutions.face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.55)
+    try:
+        for i in range(samples):
+            t = duration * (i + 0.5) / samples
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            seen += 1
+            res = det.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            for d in (res.detections or []):
+                b = d.location_data.relative_bounding_box
+                boxes.append((max(0.0, b.xmin), max(0.0, b.ymin), b.width, b.height))
+    finally:
+        cap.release()
+        det.close()
+    return boxes, seen
+
+
+def median(vals):
+    v = sorted(vals)
+    return v[len(v) // 2]
+
+
+def facecam_rect(boxes, seen):
+    """Pick the face that keeps showing up in the same place: that's the facecam."""
+    if not boxes or seen == 0:
+        return None, "noface"
+    # cluster by center (faces within 12% of the frame of each other)
+    clusters = []
+    for b in boxes:
+        cx, cy = b[0] + b[2] / 2, b[1] + b[3] / 2
+        for c in clusters:
+            if abs(c["cx"] - cx) < 0.12 and abs(c["cy"] - cy) < 0.12:
+                c["items"].append(b)
+                break
+        else:
+            clusters.append({"cx": cx, "cy": cy, "items": [b]})
+    best = max(clusters, key=lambda c: len(c["items"]))
+    if len(best["items"]) < max(3, seen * 0.25):
+        return None, "noface"   # faces only now and then (e.g. in the game): nothing static to cover
+    x, y, w, h = (median([b[k] for b in best["items"]]) for k in range(4))
+    if w * h > 0.10:
+        return None, "fullframe"   # IRL / just chatting: he IS the picture
+    # a webcam shows head + shoulders: grow the face box into the inset
+    cx, cy = x + w / 2, y + h / 2
+    W, H = w * 3.0, h * 3.4
+    rx, ry = cx - W / 2, cy - H * 0.42
+    # snap to the nearest edges when close (insets usually sit in a corner)
+    if rx < 0.12:
+        rx = 0.0
+    if ry < 0.12:
+        ry = 0.0
+    if rx + W > 0.88:
+        W = 1.0 - rx
+    if ry + H > 0.88:
+        H = 1.0 - ry
+    rx, ry = max(0.0, rx), max(0.0, ry)
+    W, H = min(W, 1.0 - rx), min(H, 1.0 - ry)
+    return (rx, ry, W, H), "facecam"
+
+
+def cover(src, dst, rect, vw, vh):
+    x, y, w, h = rect
+    X, Y = int(x * vw) // 2 * 2, int(y * vh) // 2 * 2
+    Wp, Hp = max(16, int(w * vw) // 2 * 2), max(16, int(h * vh) // 2 * 2)
+    Wp, Hp = min(Wp, vw - X), min(Hp, vh - Y)
+    r = max(8, min(Wp, Hp) // 5)
+    fc = ("[0:v]split[a][b];[b]crop={W}:{H}:{X}:{Y},scale=iw/8:-2,boxblur={r2}:4,scale={W}:{H},boxblur={r}:3[m];"
+          "[a][m]overlay={X}:{Y}[v]").format(W=Wp, H=Hp, X=X, Y=Y, r=r, r2=max(2, r // 8))
+    run(["nice", "-n", "15", FFMPEG, "-y", "-loglevel", "error", "-i", src, "-filter_complex", fc,
+         "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+         "-pix_fmt", "yuv420p", "-threads", "3", "-c:a", "copy", "-movflags", "+faststart", dst], timeout=7200)
+    return {"x": X, "y": Y, "w": Wp, "h": Hp}
+
+
+def stage_face(src, dst, report=None):
+    vw, vh, dur = probe(src)
+    boxes, seen = face_boxes(src, dur)
+    rect, kind = facecam_rect(boxes, seen)
+    result = {"kind": kind, "frames": seen, "faces": len(boxes)}
+    if kind == "facecam":
+        result["rect"] = cover(src, dst, rect, vw, vh)
+        log("facecam covered at {}".format(result["rect"]))
+    elif kind == "noface":
+        shutil.copyfile(src, dst)
+        log("no steady face found; nothing to cover")
+    if report:
+        with open(report, "w") as fh:
+            json.dump(result, fh)
+    return 3 if kind == "fullframe" else 0
+
+
+# ---------------------------------------------------------------- voice
+
+def stage_voice(src, dst):
+    tmp = tempfile.mkdtemp(prefix="hide_")
+    try:
+        wav = os.path.join(tmp, "a.wav")
+        run([FFMPEG, "-y", "-loglevel", "error", "-i", src, "-vn", "-ac", "2", "-ar", "44100", wav])
+        bed = None
+        try:
+            run(["nice", "-n", "15", sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs",
+                 "--segment", "7", "-j", "1", "-d", "cpu", "-o", tmp, wav], timeout=1800)
+            cand = os.path.join(tmp, "htdemucs", "a", "no_vocals.wav")
+            if os.path.exists(cand):
+                bed = cand
+        except Exception as exc:  # noqa: BLE001
+            log("voice split failed, muting instead: {}".format(str(exc)[-200:]))
+        if bed:
+            run([FFMPEG, "-y", "-loglevel", "error", "-i", src, "-i", bed, "-map", "0:v", "-map", "1:a",
+                 "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", dst])
+            log("voice removed")
+            return 0
+        run([FFMPEG, "-y", "-loglevel", "error", "-i", src, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+             "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest", "-movflags", "+faststart", dst])
+        log("muted (no voice split available)")
+        return 4
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def main(argv):
+    if len(argv) < 4 or argv[1] not in ("face", "voice"):
+        sys.stderr.write(__doc__)
+        return 2
+    try:
+        if argv[1] == "face":
+            report = argv[argv.index("--report") + 1] if "--report" in argv else None
+            return stage_face(argv[2], argv[3], report)
+        return stage_voice(argv[2], argv[3])
+    except Exception as exc:  # noqa: BLE001
+        log("error: {}".format(exc))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

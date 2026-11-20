@@ -311,8 +311,27 @@ def nice_time(iso):
 
 # ---------------------------------------------------------------- clips
 
+HIDE_FILE = "hide.json"   # read by the clipping pipeline: {"links": [url], "files": [name]}
+
+
+def hide_flags():
+    d = load_json(os.path.join(CONFIG["clip_inbox"], HIDE_FILE), {})
+    return {"links": list(d.get("links") or []), "files": list(d.get("files") or [])}
+
+
+def set_hide(kind, value, on):
+    d = hide_flags()
+    key = "links" if kind == "link" else "files"
+    d[key] = [x for x in d[key] if x != value] + ([value] if on else [])
+    try:
+        save_json(os.path.join(CONFIG["clip_inbox"], HIDE_FILE), d)
+    except OSError:
+        pass
+
+
 def list_inbox():
     inbox = CONFIG["clip_inbox"]
+    hide = hide_flags()
     processed = set()
     for name in ("processed.txt",):
         for base in (inbox, os.path.join(CONFIG["openshorts_dir"], "autopilot")):
@@ -335,7 +354,7 @@ def list_inbox():
                 full = os.path.join(inbox, name)
                 if name in processed or full in processed:
                     continue
-                items.append({"kind": "video", "name": name,
+                items.append({"kind": "video", "name": name, "hide": name in hide["files"],
                               "size_mb": round(os.path.getsize(full) / 1e6, 1)})
     except OSError:
         pass
@@ -344,7 +363,7 @@ def list_inbox():
             for line in fh:
                 url = line.strip()
                 if url and not url.startswith("#") and url not in processed:
-                    items.append({"kind": "link", "name": url})
+                    items.append({"kind": "link", "name": url, "hide": url in hide["links"]})
     except OSError:
         pass
     return items
@@ -1229,7 +1248,7 @@ def write_captions(force_ids=None):
 
 # ---------------------------------------------------------------- actions
 
-def add_link(url):
+def add_link(url, hide=False):
     url = (url or "").strip()
     if not re.match(r"^https?://\S+$", url):
         return False, "That doesn't look like a video link."
@@ -1238,12 +1257,14 @@ def add_link(url):
         os.makedirs(inbox, exist_ok=True)
         with open(os.path.join(inbox, "links.txt"), "a", encoding="utf-8") as fh:
             fh.write(url + "\n")
+        if hide:
+            set_hide("link", url, True)
     except OSError as exc:
         raise_error("Inbox Clerk", "Couldn't save the link",
                     "Writing to Movies → Clip Inbox failed ({}).".format(exc),
                     "Ask Claude in your project chat to check the Clip Inbox folder.", key="inbox:write")
         return False, "Couldn't save it."
-    return True, "Queued for the next clipping run."
+    return True, "Queued for the next clipping run." + (" The streamer's face and voice will be hidden." if hide else "")
 
 
 def write_redo(rec, note):
@@ -1794,6 +1815,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(import_kdp(dest))
         if kind == "ugc":
             return self.send_json(add_ugc_video(dest, q))
+        if kind == "video" and (q.get("hide") or [""])[0] == "1":
+            set_hide("file", name, True)
         return self.send_json({"ok": True, "path": dest, "name": name,
                                "message": "Added to the Clip Inbox. It's clipped on the next run." if kind == "video" else "Saved."})
 
@@ -1801,7 +1824,7 @@ class Handler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------- route handlers
 
 def r_link(d):
-    ok, msg = add_link(d.get("url"))
+    ok, msg = add_link(d.get("url"), bool(d.get("hide")))
     return {"ok": ok, "message": msg}
 
 

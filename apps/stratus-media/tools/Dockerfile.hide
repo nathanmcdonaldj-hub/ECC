@@ -1,0 +1,9 @@
+# Adds the voice splitter (demucs) on top of the OpenShorts backend image.
+# Build on the Mac:  docker build -t stratus-hide --build-arg BASE=<openshorts backend image> -f Dockerfile.hide .
+ARG BASE=openshorts-backend
+FROM ${BASE}
+# Keep the container's torch: install demucs without letting pip swap torch.
+RUN pip install --no-cache-dir --no-deps demucs==4.0.1 openunmix dora-search julius lameenc einops \
+ && pip install --no-cache-dir omegaconf retrying submitit treetable cloudpickle diffq 2>/dev/null || true
+RUN python -c "from demucs.pretrained import get_model; get_model('htdemucs')"
+COPY hide_streamer.py /opt/stratus/hide_streamer.py

@@ -93,6 +93,14 @@ button{cursor:pointer}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
 .price{font-size:20px;font-weight:900;font-variant-numeric:tabular-nums;color:var(--gold2)}
 details.pr summary{cursor:pointer;font-size:12px;color:var(--mute);font-weight:800}
+.hidesw{display:flex;align-items:center;gap:10px;cursor:pointer;background:var(--navy);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.hidesw input{position:absolute;opacity:0;width:1px;height:1px}
+.hidesw .knob{flex:none;width:42px;height:24px;border-radius:999px;background:#2a3b7d;position:relative;transition:background .2s}
+.hidesw .knob::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s}
+.hidesw input:checked+.knob{background:var(--ok)}
+.hidesw input:checked+.knob::after{transform:translateX(18px)}
+.hidesw input:focus-visible+.knob{outline:2px solid var(--gold2);outline-offset:2px}
+.hidesw small{display:block;color:var(--mute);font-size:12px;font-weight:600}
 .empty{background:var(--card);border-radius:18px;padding:28px;text-align:center;color:var(--mute)}
 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .kpi{background:var(--card);border-radius:16px;padding:12px 14px;border:0;text-align:left}
@@ -250,6 +258,7 @@ body.demo .st.done{opacity:.75}
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let S = null;            // latest state
+let hideOn = (() => { try { return localStorage.getItem("hideStreamer") === "1"; } catch (e) { return false; } })();
 let openStation = null;  // station currently shown in the sheet
 let voiceOn = (() => { try { return localStorage.getItem("voice") !== "off"; } catch (e) { return true; } })();
 
@@ -459,12 +468,14 @@ const musicSelect = (cur, key) => `<select data-music="${esc(key)}"><option valu
 const SHEETS = {
   inbox: () => `
     <div class="drop" id="vidDrop">Drag a video here, or click to pick one<br><small>Clipped weekdays 2:30 PM–6 AM and all weekend · 10–20 min videos work best</small></div>
-    <div class="box"><label class="f">Or paste a video link<input type="url" id="linkIn" placeholder="https://…"></label><div><button class="btn go" id="linkGo">Add link</button></div>
+    <div class="box"><label class="f">Or paste a video link<input type="url" id="linkIn" placeholder="https://…"></label>
+      <label class="hidesw"><input type="checkbox" id="hideSw" ${hideOn ? "checked" : ""}><span class="knob"></span><span><b>🙈 Hide the streamer</b><small>Covers his facecam and removes his voice. Game and background sound stay.</small></span></label>
+      <div><button class="btn go" id="linkGo">Add link</button></div>
       </div>
     <h3>In line to clip</h3>
-    ${S.inbox.length ? `<table><tr><th>Item</th><th>Type</th></tr>${S.inbox.map(i => `<tr><td style="word-break:break-all">${esc(i.name)}</td><td>${i.kind === "link" ? "Link" : i.size_mb + " MB"}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing in line.</p>`}`,
+    ${S.inbox.length ? `<table><tr><th>Item</th><th>Type</th></tr>${S.inbox.map(i => `<tr><td style="word-break:break-all">${esc(i.name)}</td><td>${i.kind === "link" ? "Link" : i.size_mb + " MB"}${i.hide ? " · 🙈 streamer hidden" : ""}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing in line.</p>`}`,
   clipper: () => `
-    <div class="box"><b>Night shift: 10 PM to 6 AM</b><span class="muted">One video at a time, up to 3 clips each. During the day the clipper is fully off, so your trading desk gets the whole Mac.</span></div>
+    <div class="box"><b>Clipping hours: weekdays 2:30 PM to 6 AM, weekends all day</b><span class="muted">One video at a time, up to 3 clips each. Outside those hours the clipper is fully off, so your trading desk gets the whole Mac. Use the OPEN button at the top to start early.</span></div>
     <h3>Redo requests</h3>
     ${S.redo.length ? S.redo.map(c => `<div class="box"><b>Clip ${c.num} · ${esc(c.source)}</b><span class="muted">“${esc(c.redo?.note)}”</span></div>`).join("") : `<p class="muted">None. To redo a clip, open Your Desk and press Redo, or tell the manager.</p>`}`,
   captions: () => `
@@ -565,8 +576,9 @@ function confirmCard(a) {
 
 const AFTER = {
   inbox: () => {
-    dropZone($("#vidDrop"), "video/*", f => upload("video", f));
-    $("#linkGo").onclick = () => api("/api/link", {url: $("#linkIn").value});
+    dropZone($("#vidDrop"), "video/*", f => upload("video", f, hideOn ? "&hide=1" : ""));
+    $("#hideSw").onchange = e => { hideOn = e.target.checked; try { localStorage.setItem("hideStreamer", hideOn ? "1" : "0"); } catch (x) {} };
+    $("#linkGo").onclick = () => api("/api/link", {url: $("#linkIn").value, hide: hideOn});
   },
   ugc: () => {
     let cover = null;
