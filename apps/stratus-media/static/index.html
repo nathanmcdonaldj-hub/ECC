@@ -400,7 +400,7 @@ const SHEETS = {
   inbox: () => `
     <div class="drop" id="vidDrop">Drag a video here, or click to pick one<br><small>Clipped weekdays 2:30 PM–6 AM and all weekend · 10–20 min videos work best</small></div>
     <div class="box"><label class="f">Or paste a video link<input type="url" id="linkIn" placeholder="https://…"></label><div><button class="btn go" id="linkGo">Add link</button></div>
-      <div class="muted" style="font-size:12px">Only use videos you own or have permission to post.</div></div>
+      </div>
     <h3>In line to clip</h3>
     ${S.inbox.length ? `<table><tr><th>Item</th><th>Type</th></tr>${S.inbox.map(i => `<tr><td style="word-break:break-all">${esc(i.name)}</td><td>${i.kind === "link" ? "Link" : i.size_mb + " MB"}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing in line.</p>`}`,
   clipper: () => `

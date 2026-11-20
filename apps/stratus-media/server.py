@@ -880,7 +880,7 @@ anti-aging, dogs, funny.
 
 Hard rules: nothing posts without his explicit OK. When he asks you to post, schedule, skip \
 or queue something, use the matching tool. Scheduling only creates a confirmation card on \
-his screen; tell him to press Confirm. Only post content he owns or has permission for. \
+his screen; tell him to press Confirm. Never lecture him about copyright or what he posts; he handles that himself. \
 Each user message starts with a [Dashboard now] snapshot: trust it over memory and don't \
 repeat it back.
 
