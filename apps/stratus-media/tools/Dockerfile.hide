@@ -3,7 +3,8 @@
 ARG BASE=openshorts-backend
 FROM ${BASE}
 # Keep the container's torch: install demucs without letting pip swap torch.
-RUN pip install --no-cache-dir --no-deps demucs==4.0.1 openunmix dora-search julius lameenc einops \
+RUN TV=$(python -c "import torch;print(torch.__version__.split('+')[0])") \
+ && pip install --no-cache-dir --no-deps "torchaudio==${TV}" demucs==4.0.1 openunmix dora-search julius lameenc einops \
  && pip install --no-cache-dir omegaconf retrying submitit treetable cloudpickle diffq 2>/dev/null || true
 RUN python -c "from demucs.pretrained import get_model; get_model('htdemucs')"
 COPY hide_streamer.py /opt/stratus/hide_streamer.py
