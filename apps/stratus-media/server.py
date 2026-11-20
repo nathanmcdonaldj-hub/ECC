@@ -2092,16 +2092,21 @@ def add_ugc_video(path, q):
 
 HF_API = "https://api.higgsfield.ai"
 HF_MODEL = "kling-video/v2.6/pro"
-CREATE_THREADS = {}
 
 CREATE_SYSTEM = (
-    "You turn Mr. McDonald's plain-words video idea into a plan for an AI video generator (Kling). "
+    "You turn Mr. McDonald's plain-words video idea into a plan for an AI video generator (Kling) that makes "
+    "one 5- or 10-second shot at a time; longer videos are several shots joined in order. "
     "His brand is Stratus House. He sells coloring books on Amazon KDP and posts short vertical videos. "
     "Reply with JSON only, no other text: {\"title\": short name (max 6 words), "
-    "\"prompt\": one detailed paragraph for the video model (subject, action, setting, camera move, lighting, "
-    "realistic phone-footage look for UGC; vertical 9:16; NO on-screen text, captions, logos or watermarks; "
-    "describe only what is visible), \"caption\": a post caption with a hook in the first line and a short call to action, "
-    "\"hashtags\": 3-5 hashtags in one string}. Keep it to one continuous shot that fits the length.")
+    "\"scenes\": a list with EXACTLY the number of shots asked for, each one detailed paragraph for the video model "
+    "(subject, action, setting, camera move, lighting; realistic phone-footage look for UGC; vertical 9:16; NO on-screen "
+    "text, captions, logos or watermarks; describe only what is visible). The video model does not remember earlier shots, "
+    "so repeat the same exact description of every person, animal, product, outfit, place and lighting in every shot. "
+    "The shots must flow as one story with a strong visual hook in shot 1, "
+    "\"caption\": a post caption with a hook in the first line and a short call to action, "
+    "\"hashtags\": 3-5 hashtags in one string}.")
+
+LENGTHS = {5: [5], 10: [10], 20: [10, 10], 30: [10, 10, 10], 60: [10] * 6}
 
 
 def hf_key():
@@ -2167,71 +2172,84 @@ def hf_plain(exc):
     return "Higgsfield said no (error {}): {}".format(exc.code, exc.detail[:160])
 
 
-def hf_body(c):
-    body = {"prompt": c["plan"]["prompt"], "duration": c.get("duration", 5), "cfg_scale": 0.5, "sound": "off"}
-    if c.get("image_url"):
-        body["image_url"] = c["image_url"]
+def scene_body(prompt, duration, image_url=None):
+    body = {"prompt": prompt, "duration": duration, "cfg_scale": 0.5, "sound": "off"}
+    if image_url:
+        body["image_url"] = image_url
     else:
         body["aspect_ratio"] = "9:16"
     return body
 
 
-def hf_endpoint(c):
-    return HF_MODEL + ("/image-to-video" if c.get("use_cover") else "/text-to-video")
-
-
 def hf_upload_cover(path):
+    """Put the cover somewhere Higgsfield can read it. Returns None if that isn't possible."""
     ctype = mimetypes.guess_type(path)[0] or "image/jpeg"
-    up = hf_call("POST", "/files/generate-upload-url", {"content_type": ctype})
-    with open(path, "rb") as fh:
-        data = fh.read()
-    hdrs = dict(up.get("upload_headers") or {})
-    hdrs.setdefault("Content-Type", ctype)
-    req = urllib.request.Request(up["upload_url"], data=data, headers=hdrs, method="PUT")
     try:
+        up = hf_call("POST", "/files/generate-upload-url", {"content_type": ctype})
+        with open(path, "rb") as fh:
+            data = fh.read()
+        hdrs = dict(up.get("upload_headers") or {})
+        hdrs.setdefault("Content-Type", ctype)
+        req = urllib.request.Request(up["upload_url"], data=data, headers=hdrs, method="PUT")
         with urllib.request.urlopen(req, timeout=120):
             pass
-    except urllib.error.HTTPError as exc:
-        raise HFError(exc.code, "cover upload failed")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise HFError("net", str(exc))
-    return up["public_url"]
+        return up.get("public_url")
+    except (HFError, KeyError, OSError, urllib.error.URLError, TimeoutError, ValueError):
+        return None
 
 
 def hf_estimate(c):
-    """Exact USD price from Higgsfield (same for start-from-cover)."""
+    """Total USD from Higgsfield's estimate endpoint, or None if it doesn't give one."""
+    total = 0.0
+    cache = {}
     try:
-        body = {"prompt": c["plan"]["prompt"], "duration": c.get("duration", 5), "cfg_scale": 0.5, "sound": "off", "aspect_ratio": "9:16"}
-        usd = hf_call("POST", "/estimate/" + HF_MODEL + "/text-to-video", body, timeout=30).get("usd")
-        return float(usd) if usd is not None else None
+        for sc in c["scenes"]:
+            dur = sc["duration"]
+            if dur not in cache:
+                usd = hf_call("POST", "/estimate/" + HF_MODEL + "/text-to-video",
+                              scene_body(sc["prompt"], dur), timeout=30).get("usd")
+                cache[dur] = float(usd)
+            total += cache[dur]
+        return round(total, 2)
     except (HFError, ValueError, TypeError):
         return None
 
 
 def reprice_plans():
     for c in STATE.get("creations", []):
-        if c.get("status") in ("plan", "failed") and c.get("usd") is None:
+        if c.get("status") in ("plan", "failed") and c.get("usd") is None and c.get("scenes"):
             c["usd"] = hf_estimate(c)
     persist()
 
 
-def _parse_plan(text):
+def _parse_plan(text, n):
     m = re.search(r"\{.*\}", text, re.S)
     if not m:
         raise ValueError("no json")
     plan = json.loads(m.group(0))
-    for k in ("prompt", "caption"):
-        if not str(plan.get(k) or "").strip():
-            raise ValueError("missing " + k)
-    plan.setdefault("title", "New video")
-    plan.setdefault("hashtags", "")
-    return {k: str(plan[k]).strip() for k in ("title", "prompt", "caption", "hashtags")}
+    scenes = plan.get("scenes") or ([plan["prompt"]] if plan.get("prompt") else [])
+    scenes = [str(x).strip() for x in scenes if str(x).strip()]
+    if not scenes or not str(plan.get("caption") or "").strip():
+        raise ValueError("incomplete")
+    while len(scenes) < n:
+        scenes.append(scenes[-1])
+    return {"title": str(plan.get("title") or "New video").strip(), "caption": str(plan["caption"]).strip(),
+            "hashtags": str(plan.get("hashtags") or "").strip()}, scenes[:n]
+
+
+def _migrate(c):
+    """Plans made before multi-scene support had one prompt."""
+    if not c.get("scenes"):
+        c["scenes"] = [{"prompt": (c.get("plan") or {}).get("prompt", ""), "duration": c.get("duration", 5)}]
+    return c
 
 
 def create_public(c):
+    _migrate(c)
     out = {k: c.get(k) for k in ("id", "kind", "ask", "book", "duration", "use_cover", "usd", "status",
-                                 "error", "created", "done_at", "clip_id")}
-    out["plan"] = c.get("plan")
+                                 "error", "created", "done_at", "clip_id", "stage")}
+    out["plan"] = {k: (c.get("plan") or {}).get(k) for k in ("title", "caption", "hashtags")}
+    out["scenes"] = [{"prompt": sc["prompt"], "duration": sc["duration"], "done": bool(sc.get("file"))} for sc in c["scenes"]]
     if c.get("file"):
         out["video_url"] = "/ugc-file?f=" + urllib.parse.quote(os.path.basename(c["file"]))
     return out
@@ -2242,7 +2260,12 @@ def r_create_plan(d):
     if len(ask) < 4:
         return {"ok": False, "message": "Type a few words about the video you want."}
     kind = "promo" if d.get("kind") == "promo" else "original"
-    duration = 10 if str(d.get("duration")) == "10" else 5
+    try:
+        total = int(d.get("duration") or 5)
+    except (TypeError, ValueError):
+        total = 5
+    durs = LENGTHS.get(total, [5])
+    total = sum(durs)
     book = None
     if kind == "promo":
         with LOCK:
@@ -2250,16 +2273,16 @@ def r_create_plan(d):
         if not book:
             return {"ok": False, "message": "Pick which coloring book this promo is for (add one in the UGC Director first)."}
     use_cover = bool(book and book.get("cover") and d.get("use_cover", True))
-    user = "Video type: {}.\nLength: {} seconds.\nHis idea: {}".format(
+    user = "Video type: {}.\nTotal length: {} seconds = {} shot(s) of {} seconds each, in order.\nHis idea: {}".format(
         "UGC promo for his coloring book “{}”{}".format(
-            book["title"], " (the video starts from a photo of the book cover; describe how the scene moves from it)"
+            book["title"], " (shot 1 starts from a photo of the book cover; describe how the scene moves from it)"
             if use_cover else "") if book else "original short video for his channels",
-        duration, ask[:1500])
+        total, len(durs), " / ".join(str(x) for x in durs), ask[:1500])
     try:
-        resp = call_claude({"max_tokens": 1200, "system": CREATE_SYSTEM,
+        resp = call_claude({"max_tokens": 900 + 450 * len(durs), "system": CREATE_SYSTEM,
                             "messages": [{"role": "user", "content": user}]},
                            STATE["chat"].get("model") or CONFIG["default_model"])
-        plan = _parse_plan(text_of(resp.get("content", [])))
+        plan, prompts = _parse_plan(text_of(resp.get("content", [])), len(durs))
     except ClaudeError as exc:
         claude_error_to_alert("UGC Director", exc)
         return {"ok": False, "message": "Your manager couldn't write the plan. See the alert at the top."}
@@ -2267,9 +2290,10 @@ def r_create_plan(d):
         return {"ok": False, "message": "The plan came back garbled. Press Plan it again."}
     if book and book.get("amazon_url"):
         plan["caption"] += "\n" + book["amazon_url"]
-    c = {"id": uuid.uuid4().hex[:8], "kind": kind, "ask": ask, "duration": duration,
+    c = {"id": uuid.uuid4().hex[:8], "kind": kind, "ask": ask, "duration": total,
          "book_id": book["id"] if book else None, "book": book["title"] if book else None,
-         "use_cover": use_cover, "plan": plan, "status": "plan", "created": now_iso()}
+         "use_cover": use_cover, "plan": plan, "status": "plan", "created": now_iso(),
+         "scenes": [{"prompt": p, "duration": du} for p, du in zip(prompts, durs)]}
     c["usd"] = hf_estimate(c) if hf_key() else None
     with LOCK:
         STATE.setdefault("creations", []).append(c)
@@ -2283,8 +2307,14 @@ def r_create_edit(d):
         c = next((x for x in STATE.get("creations", []) if x["id"] == d.get("id")), None)
         if not c or c["status"] not in ("plan", "failed"):
             return {"ok": False, "message": "That video can't be changed now."}
-        if d.get("prompt"):
-            c["plan"]["prompt"] = str(d["prompt"]).strip()[:2500]
+        _migrate(c)
+        if d.get("prompt") and str(d.get("scene", "")).isdigit():
+            i = int(d["scene"])
+            if 0 <= i < len(c["scenes"]):
+                sc = c["scenes"][i]
+                sc["prompt"] = str(d["prompt"]).strip()[:2500]
+                for k in ("file", "request_id", "status_url"):
+                    sc.pop(k, None)   # changed scene gets made again
         if d.get("caption") is not None:
             c["plan"]["caption"] = str(d["caption"]).strip()[:2200]
         persist()
@@ -2298,49 +2328,85 @@ def r_create_make(d):
         c = next((x for x in STATE.get("creations", []) if x["id"] == d.get("id")), None)
         if not c:
             return {"ok": False, "message": "That plan is gone. Make a new one."}
-        if c["status"] in ("submitting", "making", "done"):
+        _migrate(c)
+        if c["status"] in ("submitting", "making", "joining", "done"):
             return {"ok": False, "message": "That one is already being made."}
+        if len(c["scenes"]) > 1 and not find_ffmpeg():
+            return {"ok": False, "message": "Joining scenes needs ffmpeg on your Mac, and it's missing. Ask Claude in your project chat to install it."}
         c["status"], c["error"] = "submitting", None
-        c.pop("request_id", None)
-        c.pop("status_url", None)
         c["attempt"] = c.get("attempt", 0) + 1
+        for sc in c["scenes"]:
+            if not (sc.get("file") and os.path.exists(sc["file"])):
+                for k in ("file", "request_id", "status_url"):
+                    sc.pop(k, None)   # finished scenes are kept, so a retry only pays for what failed
         persist()
     threading.Thread(target=_create_run, args=(c,), daemon=True).start()
-    return {"ok": True, "message": "Making it now. It takes about 2 to 6 minutes, then it lands at Your Desk."}
+    n = len(c["scenes"])
+    return {"ok": True, "message": "Making it now. About 2 to 6 minutes{}, then it lands at Your Desk.".format(
+        "" if n == 1 else " (all {} scenes are made at the same time)".format(n))}
 
 
 def r_create_delete(d):
     with LOCK:
         before = len(STATE.get("creations", []))
         STATE["creations"] = [x for x in STATE.get("creations", [])
-                              if not (x["id"] == d.get("id") and x["status"] not in ("submitting", "making"))]
+                              if not (x["id"] == d.get("id") and x["status"] not in ("submitting", "making", "joining"))]
         persist()
         return {"ok": len(STATE["creations"]) < before}
 
 
 def _create_fail(c, msg):
     with LOCK:
-        c["status"], c["error"] = "failed", msg
+        c["status"], c["error"], c["stage"] = "failed", msg, None
         persist()
     notify_mac("Stratus House · Create", "A video didn't finish: " + msg[:120])
 
 
+def _parts_dir(c):
+    d = os.path.join(DATA_DIR, "create-parts", c["id"])
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 def _create_run(c):
     try:
-        if not c.get("request_id"):
-            if c.get("use_cover") and not c.get("image_url"):
-                with LOCK:
-                    book = next((b for b in STATE["books"] if b["id"] == c.get("book_id")), None)
-                if book and book.get("cover") and os.path.exists(book["cover"]):
-                    c["image_url"] = hf_upload_cover(book["cover"])
-                else:
-                    c["use_cover"] = False
-            r = hf_call("POST", "/" + hf_endpoint(c), hf_body(c), idem="stratus-{}-{}".format(c["id"], c["attempt"]))
+        _migrate(c)
+        image_url = None
+        if c.get("use_cover") and not c["scenes"][0].get("request_id") and not c["scenes"][0].get("file"):
             with LOCK:
-                c["request_id"], c["status_url"] = r.get("request_id"), r.get("status_url")
+                book = next((b for b in STATE["books"] if b["id"] == c.get("book_id")), None)
+            if book and book.get("cover") and os.path.exists(book["cover"]):
+                image_url = hf_upload_cover(book["cover"])
+        # 1) submit every scene that isn't finished yet
+        for i, sc in enumerate(c["scenes"]):
+            if sc.get("file") or sc.get("request_id"):
+                continue
+            img = image_url if i == 0 else None
+            endpoint = HF_MODEL + ("/image-to-video" if img else "/text-to-video")
+            for attempt in range(4):
+                try:
+                    r = hf_call("POST", "/" + endpoint, scene_body(sc["prompt"], sc["duration"], img),
+                                idem="stratus-{}-{}-{}".format(c["id"], i, c["attempt"]))
+                    break
+                except HFError as exc:
+                    if exc.code == 429 and attempt < 3:
+                        time.sleep(20)
+                        continue
+                    raise
+            with LOCK:
+                sc["request_id"], sc["status_url"] = r.get("request_id"), r.get("status_url")
                 c["status"] = "making"
                 persist()
-        _create_poll(c)
+            time.sleep(1)
+        with LOCK:
+            c["status"] = "making"
+            persist()
+        # 2) wait for all of them and download each one
+        _create_poll_all(c)
+        if c.get("status") == "failed":
+            return
+        # 3) join (or just keep the one scene) and send to Your Desk
+        _create_finish(c)
     except HFError as exc:
         _create_fail(c, hf_plain(exc))
     except Exception as exc:  # never kill the server over one video
@@ -2348,47 +2414,100 @@ def _create_run(c):
         _create_fail(c, "Something unexpected went wrong ({}).".format(str(exc)[:80]))
 
 
-def _create_poll(c):
-    url = c.get("status_url") or "{}/requests/{}/status".format(HF_API, c["request_id"])
-    wait, started = 2.0, time.time()
-    while time.time() - started < 40 * 60:
-        time.sleep(wait)
-        wait = min(wait * 1.5, 10.0)
-        try:
-            r = hf_call("GET", url, timeout=30)
-        except HFError as exc:
-            if exc.code in ("net", 429) or (isinstance(exc.code, int) and exc.code >= 500):
-                wait = 20.0
-                continue
-            raise
-        st = r.get("status")
-        if st == "completed":
-            vurl = (r.get("video") or {}).get("url")
-            if not vurl:
-                raise HFError("x", "finished but no video link came back")
-            return _create_save(c, vurl)
-        if st in ("failed", "nsfw", "canceled"):
-            return _create_fail(c, {"nsfw": "Higgsfield's safety filter blocked it. Nothing was charged. Reword the idea and try again.",
-                                    "canceled": "It was canceled. Nothing was charged."}.get(
-                st, "Higgsfield couldn't make this one. Nothing was charged. Press Try again."))
-    _create_fail(c, "It took over 40 minutes, so I stopped waiting. Press Try again.")
-
-
-def _create_save(c, vurl):
-    os.makedirs(CONFIG["ugc_dir"], exist_ok=True)
-    slug = re.sub(r"[^\w\-]+", "-", c["plan"]["title"]).strip("-")[:40] or "video"
-    dest = os.path.join(CONFIG["ugc_dir"], "{}-{}.mp4".format(slug, c["id"]))
+def _download(url, dest):
     tmp = dest + ".part"
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(vurl, timeout=300) as resp, open(tmp, "wb") as fh:
+            with urllib.request.urlopen(url, timeout=300) as resp, open(tmp, "wb") as fh:
                 shutil.copyfileobj(resp, fh, 1048576)
-            break
+            os.replace(tmp, dest)
+            return True
         except (urllib.error.URLError, TimeoutError, OSError):
-            if attempt == 2:
-                return _create_fail(c, "The video was made but the download failed. It's kept at Higgsfield for 7 days. Press Try again.")
             time.sleep(10)
-    os.replace(tmp, dest)
+    return False
+
+
+def _create_poll_all(c):
+    wait, started = 3.0, time.time()
+    n = len(c["scenes"])
+    while time.time() - started < 45 * 60:
+        pending = [(i, sc) for i, sc in enumerate(c["scenes"]) if not sc.get("file")]
+        if not pending:
+            return
+        time.sleep(wait)
+        wait = min(wait * 1.5, 12.0)
+        for i, sc in pending:
+            url = sc.get("status_url") or "{}/requests/{}/status".format(HF_API, sc["request_id"])
+            try:
+                r = hf_call("GET", url, timeout=30)
+            except HFError as exc:
+                if exc.code in ("net", 429) or (isinstance(exc.code, int) and exc.code >= 500):
+                    continue
+                raise
+            st = r.get("status")
+            if st == "completed":
+                vurl = (r.get("video") or {}).get("url")
+                dest = os.path.join(_parts_dir(c), "scene{}.mp4".format(i + 1))
+                if not vurl or not _download(vurl, dest):
+                    return _create_fail(c, "Scene {} was made but the download failed. It's kept at Higgsfield for 7 days. Press Try again (finished scenes aren't paid for twice).".format(i + 1))
+                with LOCK:
+                    sc["file"] = dest
+                    done = sum(1 for x in c["scenes"] if x.get("file"))
+                    c["stage"] = "Scene {} of {} done".format(done, n) if n > 1 else None
+                    persist()
+            elif st in ("failed", "nsfw", "canceled"):
+                with LOCK:
+                    sc.pop("request_id", None)
+                    sc.pop("status_url", None)
+                which = "" if n == 1 else "Scene {}: ".format(i + 1)
+                return _create_fail(c, which + {
+                    "nsfw": "Higgsfield's safety filter blocked it. Nothing was charged for it. Reword that part and press Try again.",
+                    "canceled": "It was canceled. Nothing was charged for it."}.get(
+                    st, "Higgsfield couldn't make it. Nothing was charged for it. Press Try again."))
+    _create_fail(c, "It took over 45 minutes, so I stopped waiting. Press Try again (finished scenes are kept).")
+
+
+def _join(files, dest):
+    """Join scenes with no re-encoding (light on the Mac). Re-encode gently only if that fails."""
+    ff = find_ffmpeg()
+    lst = dest + ".txt"
+    with open(lst, "w", encoding="utf-8") as fh:
+        for f in files:
+            fh.write("file '{}'\n".format(f.replace("'", "'\\''")))
+    nice = ["nice", "-n", "15"] if shutil.which("nice") else []
+    tries = [
+        [ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", "-movflags", "+faststart", dest],
+        nice + [ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c:v", "libx264", "-preset", "veryfast",
+                "-crf", "19", "-pix_fmt", "yuv420p", "-threads", "2", "-an", "-movflags", "+faststart", dest],
+    ]
+    try:
+        for cmd in tries:
+            try:
+                if subprocess.run(cmd, capture_output=True, timeout=900).returncode == 0 and os.path.getsize(dest) > 0:
+                    return True
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        return False
+    finally:
+        try:
+            os.remove(lst)
+        except OSError:
+            pass
+
+
+def _create_finish(c):
+    os.makedirs(CONFIG["ugc_dir"], exist_ok=True)
+    slug = re.sub(r"[^\w\-]+", "-", c["plan"]["title"]).strip("-")[:40] or "video"
+    dest = os.path.join(CONFIG["ugc_dir"], "{}-{}.mp4".format(slug, c["id"]))
+    files = [sc["file"] for sc in c["scenes"]]
+    if len(files) == 1:
+        shutil.copyfile(files[0], dest)
+    else:
+        with LOCK:
+            c["status"], c["stage"] = "joining", "Joining {} scenes into one video".format(len(files))
+            persist()
+        if not _join(files, dest):
+            return _create_fail(c, "All scenes were made, but joining them failed. Press Try again (you won't pay again).")
     cid = "UGC/" + os.path.basename(dest)
     with LOCK:
         STATE["clips"][cid] = {
@@ -2399,18 +2518,22 @@ def _create_save(c, vurl):
             "platforms": ["instagram", "youtube", "tiktok"], "time": suggest_time(0),
             "why": "Evenings get the most traffic.", "music": "auto", "added": now_iso(),
         }
-        c.update(status="done", file=dest, clip_id=cid, done_at=now_iso())
+        c.update(status="done", file=dest, clip_id=cid, done_at=now_iso(), stage=None)
         persist()
+    shutil.rmtree(os.path.join(DATA_DIR, "create-parts", c["id"]), ignore_errors=True)
     notify_mac("Stratus House · Create", "Your video “{}” is ready at Your Desk.".format(c["plan"]["title"]))
 
 
 def resume_creations():
     for c in STATE.get("creations", []):
-        if c.get("status") in ("submitting", "making") and c.get("request_id"):
-            c["status"] = "making"
-            threading.Thread(target=_create_run, args=(c,), daemon=True).start()
-        elif c.get("status") == "submitting":
-            c["status"], c["error"] = "failed", "The dashboard restarted before it started. Nothing was charged. Press Try again."
+        _migrate(c)
+        if c.get("status") in ("submitting", "making", "joining"):
+            if any(sc.get("request_id") or sc.get("file") for sc in c["scenes"]):
+                c["status"] = "making"
+                threading.Thread(target=_create_run, args=(c,), daemon=True).start()
+            else:
+                c["status"], c["error"] = "failed", "The dashboard restarted before it started. Nothing was charged. Press Try again."
+
 
 ROUTES = {
     "/api/live-refresh": r_live_refresh,

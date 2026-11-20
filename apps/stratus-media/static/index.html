@@ -85,8 +85,8 @@ button{cursor:pointer}
 .ccard .thumb{width:120px;height:213px;border-radius:12px;background:var(--navy);display:grid;place-items:center;overflow:hidden;color:var(--mute);font-size:12px;text-align:center;border:0;padding:0}
 .ccard .thumb video{width:100%;height:100%;object-fit:cover}
 .ccard .info{display:flex;flex-direction:column;gap:8px;min-width:0}
-.badge{font-size:11px;font-weight:900;padding:3px 9px;border-radius:999px;background:var(--navy);align-self:flex-start}
-.badge.plan{color:var(--gold2)}.badge.making{color:#7fd6ff}.badge.done{color:#6be39a}.badge.failed{color:#ff8a8a}
+.cbadge{font-size:11px;font-weight:900;padding:3px 9px;border-radius:999px;background:var(--navy);align-self:flex-start}
+.cbadge.plan{color:var(--gold2)}.cbadge.making{color:#7fd6ff}.cbadge.done{color:#6be39a}.cbadge.failed{color:#ff8a8a}
 .spin{width:30px;height:30px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--gold);animation:sp 1.2s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
@@ -793,7 +793,7 @@ const C_EXAMPLES = {
   promo: ["A mom and her daughter coloring the bunny page at a cozy kitchen table", "Hands flip through the book slowly on a wooden desk, warm morning light", "Someone opens an Amazon box and smiles when they see the book"],
   original: ["A golden retriever sprinting on a beach at sunset, slow motion", "A businessman in a navy suit walking into a glass skyscraper at dawn", "A woman doing a morning stretch on a balcony over a city"]
 };
-const C_STATUS = {plan: "Plan ready · not made yet", submitting: "Starting…", making: "Making it… 2 to 6 min", done: "Done · at Your Desk", failed: "Didn't finish"};
+const C_STATUS = {plan: "Plan ready · not made yet", submitting: "Starting…", making: "Making it… 2 to 6 min", joining: "Joining scenes…", done: "Done · at Your Desk", failed: "Didn't finish"};
 function createForm() {
   const books = S.books || [];
   return `<div class="cform">
@@ -810,7 +810,8 @@ function createForm() {
     <textarea id="cAsk" rows="4" placeholder="e.g. ${esc(C_EXAMPLES[cKind][0])}"></textarea>
     <div class="chips">${C_EXAMPLES[cKind].map(x => `<button class="chip" data-cex="${esc(x)}">${esc(x.length > 38 ? x.slice(0, 36) + "…" : x)}</button>`).join("")}</div>
     <h3>3 · How long?</h3>
-    <div class="chips"><button class="chip ${cLen === 5 ? "on" : ""}" data-clen="5">5 seconds</button><button class="chip ${cLen === 10 ? "on" : ""}" data-clen="10">10 seconds</button></div>
+    <div class="chips">${[5, 10, 20, 30, 60].map(n => `<button class="chip ${cLen === n ? "on" : ""}" data-clen="${n}">${n < 60 ? n + " sec" : "1 min"}</button>`).join("")}</div>
+    <span class="muted" style="font-size:12px" id="cLenNote">${cLen > 10 ? `Made as ${cLen / 10} scenes of 10 seconds, then joined into one ${cLen < 60 ? cLen + "-second" : "1-minute"} video. The price covers all of them.` : "One continuous shot."}</span>
     <button class="btn go" id="cPlan" style="padding:12px">✍️ Plan it · shows the price first</button>
     <span class="muted" style="font-size:12px">Your manager writes the video plan and caption. Nothing is spent until you press <b>Make it</b>.</span>
   </div>`;
@@ -820,17 +821,17 @@ function createCard(c) {
   const usd = c.usd != null ? "$" + Number(c.usd).toFixed(2) : null;
   const thumb = c.status === "done" && c.video_url
     ? `<button class="thumb" data-cplay="${c.id}" aria-label="Play">▶ Play</button>`
-    : c.status === "making" || c.status === "submitting" ? `<div class="thumb"><div class="spin"></div></div>`
+    : ["making", "submitting", "joining"].includes(c.status) ? `<div class="thumb"><div class="spin"></div></div>`
     : `<div class="thumb">${c.kind === "promo" ? "📚" : "✨"}<br>${c.duration}s · 9:16</div>`;
   const editable = c.status === "plan" || c.status === "failed";
   return `<div class="ccard">${thumb}<div class="info">
-    <span class="badge ${c.status === "submitting" ? "making" : c.status}">${C_STATUS[c.status] || c.status}</span>
+    <span class="cbadge ${["submitting", "joining"].includes(c.status) ? "making" : c.status}">${c.stage ? esc(c.stage) : (C_STATUS[c.status] || c.status)}</span>
     <b>${esc(p.title || "New video")}</b>
-    <span class="muted" style="font-size:12px">${c.kind === "promo" ? "Promo for " + esc(c.book || "") + (c.use_cover ? " · starts from cover" : "") : "Original"} · ${c.duration}s · you asked: “${esc(c.ask)}”</span>
+    <span class="muted" style="font-size:12px">${c.kind === "promo" ? "Promo for " + esc(c.book || "") + (c.use_cover ? " · starts from cover" : "") : "Original"} · ${c.duration}s${(c.scenes || []).length > 1 ? " · " + c.scenes.length + " scenes joined" : ""} · you asked: “${esc(c.ask)}”</span>
     ${c.error ? `<span style="color:#ff8a8a;font-size:13px;font-weight:700">${esc(c.error)}</span>` : ""}
-    ${editable ? `<details class="pr"><summary>See or tweak the video plan</summary><textarea data-cedit="${c.id}" data-f="prompt" rows="5">${esc(p.prompt)}</textarea></details>
+    ${editable ? `<details class="pr"><summary>See or tweak the video plan${(c.scenes || []).length > 1 ? " (" + c.scenes.length + " scenes)" : ""}</summary>${(c.scenes || []).map((sc, i) => `${c.scenes.length > 1 ? `<div class="muted" style="font-size:12px;margin-top:6px">Scene ${i + 1} · ${sc.duration}s${sc.done ? " · ✅ already made, kept" : ""}</div>` : ""}<textarea data-cedit="${c.id}" data-f="prompt" data-scene="${i}" rows="4">${esc(sc.prompt)}</textarea>`).join("")}</details>
       <label class="f">Caption<textarea data-cedit="${c.id}" data-f="caption" rows="3">${esc(p.caption)}</textarea></label>
-      <div class="row" style="align-items:center">${usd ? "" : `<span class="muted" style="font-size:12px">${S.settings.has_higgsfield_key ? "About $0.40 to $0.80 for 5 seconds (Higgsfield didn't give an exact price)" : "Price shows once your Higgsfield key is in Settings"}</span>`}
+      <div class="row" style="align-items:center">${usd ? "" : `<span class="muted" style="font-size:12px">${S.settings.has_higgsfield_key ? "About $" + (0.08 * c.duration).toFixed(2) + " to $" + (0.16 * c.duration).toFixed(2) + " (Higgsfield didn't give an exact price)" : "Price shows once your Higgsfield key is in Settings"}</span>`}
         <button class="btn go" data-cmake="${c.id}" data-usd="${usd || ""}">${c.status === "failed" ? "↻ Try again" : "🎬 Make it"}${usd ? " · " + usd : ""}</button>
         <button class="btn sm bad" data-cdel="${c.id}">Delete</button></div>`
     : c.status === "done" ? `<span class="muted" style="font-size:12px">Caption and hashtags are ready. Approve it at Your Desk. Nothing posts without your OK.</span><div class="row"><button class="btn go sm" data-open="desk">Go to Your Desk</button></div>`
@@ -854,7 +855,11 @@ document.addEventListener("focusout", e => {
   const d = e.target.dataset || {};
   if (d.cedit) {
     const c = (S.creations || []).find(x => x.id === d.cedit);
-    if (c && c.plan && c.plan[d.f] !== e.target.value) { c.plan[d.f] = e.target.value; fetch("/api/create-edit", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: d.cedit, [d.f]: e.target.value})}); }
+    if (!c) return;
+    if (d.f === "prompt") {
+      const sc = (c.scenes || [])[+d.scene];
+      if (sc && sc.prompt !== e.target.value) { sc.prompt = e.target.value; fetch("/api/create-edit", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: d.cedit, scene: d.scene, prompt: e.target.value})}); }
+    } else if (c.plan && c.plan[d.f] !== e.target.value) { c.plan[d.f] = e.target.value; fetch("/api/create-edit", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: d.cedit, [d.f]: e.target.value})}); }
   }
 });
 
@@ -887,7 +892,7 @@ document.addEventListener("click", async e => {
   }
   if (t.id === "liveRefresh") return api("/api/live-refresh");
   if (d.ckind && !demo) { const ask = $("#cAsk").value; cKind = d.ckind; $("#cForm").innerHTML = createForm(); $("#cAsk").value = ask; return; }
-  if (d.clen) { cLen = +d.clen; t.parentElement.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c === t)); return; }
+  if (d.clen) { cLen = +d.clen; const ask = $("#cAsk").value; $("#cForm").innerHTML = createForm(); $("#cAsk").value = ask; return; }
   if (d.cex) { $("#cAsk").value = d.cex; $("#cAsk").focus(); return; }
   if (t.id === "cPlan") {
     const ask = $("#cAsk").value.trim();
