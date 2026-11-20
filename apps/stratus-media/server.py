@@ -314,6 +314,17 @@ def nice_time(iso):
 HIDE_FILE = "hide.json"   # read by the clipping pipeline: {"links": [url], "files": [name]}
 
 
+def hide_ready():
+    """The face/voice helper is set up (written after the helper image builds and passes its test)."""
+    return os.path.exists(os.path.join(APP_DIR, "tools", ".hide-ready"))
+
+
+def clip_work():
+    """Inbox items the clipper can do now (hidden ones wait until the helper is set up)."""
+    ready = hide_ready()
+    return [x for x in list_inbox() if ready or not x.get("hide")]
+
+
 def hide_flags():
     d = load_json(os.path.join(CONFIG["clip_inbox"], HIDE_FILE), {})
     return {"links": list(d.get("links") or []), "files": list(d.get("files") or [])}
@@ -1383,6 +1394,7 @@ def build_state(for_model=False):
         "workers": workers,
         "gate": gate_public(),
         "inbox": inbox,
+        "hide_ready": hide_ready(),
         "clips_waiting": waiting,
         "clips_scheduled": scheduled,
         "tiktok": tiktok,
@@ -1533,7 +1545,7 @@ def start_clipper():
     log = open(CONFIG["autopilot_log"], "a", encoding="utf-8")
     RUN["proc"] = subprocess.Popen(["/usr/bin/nice", "-n", "10", "/bin/bash", path], env=env,
                                    stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-    RUN["queue_before"] = [x.get("name") or x.get("url") for x in list_inbox()]
+    RUN["queue_before"] = [x.get("name") or x.get("url") for x in clip_work()]
     RUN["stopped"] = False
 
 
@@ -1542,7 +1554,7 @@ def run_clipper_gate():
     proc = RUN["proc"]
     if proc and proc.poll() is not None:  # a run just finished
         RUN["proc"] = None
-        left = [x.get("name") or x.get("url") for x in list_inbox()]
+        left = [x.get("name") or x.get("url") for x in clip_work()]
         RUN["cool_until"] = time.time() + (3 * 3600 if left and left == RUN["queue_before"] else 15 * 60)
         stop_openshorts("run finished")
         return
@@ -1559,7 +1571,7 @@ def run_clipper_gate():
         return
     if time.time() < RUN["cool_until"]:
         return
-    if list_inbox() or _redo_pending():
+    if clip_work() or _redo_pending():
         start_clipper()
 
 
@@ -1622,13 +1634,25 @@ def check_autopilot_log():
         low = line.lower()
         if not any(w in low for w in ("error", "failed", "traceback", "exception")):
             continue
+        if "unable to find image" in low or "pull access denied" in low or "error response from daemon" in low \
+                or "hide failed, left for retry" in low:
+            continue   # Docker's own lines for a failed hide step; the HIDE: line explains it
         what, fix = explain_clipper_line(line)
         raise_error("Clipper", "Clipping hit a problem", what, fix, key="clip:" + fix[:40])
 
 
 def explain_clipper_line(line):
     low = line.lower()
-    if "docker" in low and ("not running" in low or "cannot connect" in low or "daemon" in low):
+    if "hide:" in low and "fills the screen" in low:
+        return ("A video with “Hide the streamer” on was skipped: the streamer fills the whole screen, so he can't be hidden.",
+                "Nothing to do. Pick videos where he's in a small webcam box, or turn Hide off for that one.")
+    if "hide:" in low and "muted" in low:
+        return ("His voice couldn't be split out of one clip, so that clip was made silent instead.",
+                "Nothing to do. Add music at Your Desk if you like.")
+    if "hide:" in low or "stratus-hide" in low:
+        return ("Hiding the streamer didn't work this time, so the video was NOT clipped. It stays in line.",
+                "Nothing to do. It tries again on the next run.")
+    if "docker" in low and ("not running" in low or "cannot connect" in low or "is the docker daemon running" in low):
         return ("Docker (the engine the clipper runs in) didn't start.",
                 "Open the Docker app once, then the clipper retries on its next run. Or ask Claude in your project chat.")
     if "429" in low or "quota" in low or "resource_exhausted" in low:
