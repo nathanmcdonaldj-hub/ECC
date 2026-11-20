@@ -466,7 +466,7 @@ def scan_clips():
 def clip_public(rec):
     out = {k: rec.get(k) for k in (
         "id", "source", "num", "status", "caption", "hashtags", "platforms",
-        "time", "why", "music", "voice_text", "voice", "notes", "posted_at", "results", "missing",
+        "time", "why", "music", "voice_text", "voice", "voice_when", "notes", "posted_at", "results", "missing",
         "tiktok_done", "redo", "metrics", "metrics_at")}
     out["video_url"] = "/media?f=" + urllib.parse.quote(rec["id"])
     out["thumb_url"] = ("/media?thumb=1&f=" + urllib.parse.quote(rec["id"])) if rec.get("thumb") else None
@@ -560,6 +560,13 @@ def make_voice(text, voice, out_path):
     return out_path
 
 
+def media_duration(ff, path):
+    """Length in seconds, read from ffmpeg's own header line (no ffprobe needed)."""
+    res = subprocess.run([ff, "-hide_banner", "-i", path], capture_output=True, text=True, timeout=60)
+    m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", res.stderr)
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)) if m else None
+
+
 def wants_mix(rec):
     return (rec.get("music") or "none") != "none" or bool((rec.get("voice_text") or "").strip())
 
@@ -593,7 +600,12 @@ def mix_music(rec):
         vfile = make_voice(line, rec.get("voice"), base + ".voice.aiff")
         vi = len(inputs) // 2
         inputs += ["-i", vfile]
-        parts.append("[{}:a]aresample=48000,adelay=400|400,volume=1.8,apad,asplit=2[vo][vkey]".format(vi))
+        delay = 400
+        if rec.get("voice_when") == "end":
+            clip_len, voice_len = media_duration(ff, rec["file"]), media_duration(ff, vfile)
+            if clip_len and voice_len:
+                delay = max(0, int((clip_len - voice_len - 0.4) * 1000))
+        parts.append("[{0}:a]aresample=48000,adelay={1}|{1},volume=1.8,apad,asplit=2[vo][vkey]".format(vi, delay))
         parts.append("[0:a][vkey]sidechaincompress=threshold=0.02:ratio=10:attack=20:release=350[orig]")
         orig = "[orig]"
         mix.append("[vo]")
@@ -1386,7 +1398,7 @@ def write_redo(rec, note):
     persist()
 
 
-def apply_schedule(clip_id, time_s, platforms, caption, hashtags, music, voice_text=None, voice=None):
+def apply_schedule(clip_id, time_s, platforms, caption, hashtags, music, voice_text=None, voice=None, voice_when=None):
     rec = STATE["clips"].get(clip_id)
     if not rec:
         return False, "Clip not found."
@@ -1406,6 +1418,9 @@ def apply_schedule(clip_id, time_s, platforms, caption, hashtags, music, voice_t
         rec.pop("music_file", None)
     if voice is not None:
         rec["voice"] = voice
+    if voice_when in ("start", "end") and voice_when != rec.get("voice_when", "start"):
+        rec["voice_when"] = voice_when
+        rec.pop("music_file", None)
     rec["status"] = "scheduled"
     rec["approved_at"] = now_iso()
     if "tiktok" in rec["platforms"]:
@@ -1966,7 +1981,7 @@ def r_approve(d):
     with LOCK:
         ok, msg = apply_schedule(d.get("id"), d.get("time"), d.get("platforms") or [],
                                  d.get("caption"), d.get("hashtags"), d.get("music"),
-                                 d.get("voice_text"), d.get("voice"))
+                                 d.get("voice_text"), d.get("voice"), d.get("voice_when"))
     return {"ok": ok, "message": msg}
 
 
@@ -2048,6 +2063,8 @@ def r_music_preview(d):
             rec["voice_text"] = (d.get("voice_text") or "").strip()[:400]
         if d.get("voice") is not None:
             rec["voice"] = d.get("voice")
+        if d.get("voice_when") in ("start", "end"):
+            rec["voice_when"] = d.get("voice_when")
         if not wants_mix(rec):
             return {"ok": False, "message": "Pick music or type a voice line first."}
     try:
