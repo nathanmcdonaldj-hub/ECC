@@ -49,7 +49,7 @@ DEFAULT_CONFIG = {
     "upload_post_monthly_limit": 10,
     # Clipping hours: weekdays from market close until morning, weekends all day.
     "clip_weekday_open": "14:30",
-    "clip_close": "06:00",
+    "clip_close": "06:30",
     "clip_weekends_all_day": True,
     "night_run": os.path.join(HOME, "openshorts", "autopilot", "night_run.sh"),
     "morning_stop": os.path.join(HOME, "openshorts", "autopilot", "morning_stop.sh"),
@@ -245,7 +245,7 @@ def parse_hhmm(s):
 
 
 def in_clip_window(dt=None):
-    """Weekdays from market close (2:30 PM) to 6 AM; Saturday and Sunday all day."""
+    """Weekdays from market close (2:30 PM) to 6:30 AM; Saturday and Sunday all day."""
     dt = dt or now()
     if CONFIG.get("clip_weekends_all_day", True) and dt.weekday() >= 5:
         return True
@@ -944,7 +944,7 @@ How you talk: short, blunt, numbers first, plain words, no jargon, no recaps. Co
 questions first. When there are options give at most 3 and mark your pick. Never show \
 passwords or keys. If you were wrong, say "I was wrong" plainly.
 
-What you run: clips are made from his Clip Inbox on weekdays from 2:30 PM (after he finishes trading) to 6 AM and all day on weekends, 3 clips per video max (he can press Open/Close on the dashboard); you and the \
+What you run: clips are made from his Clip Inbox on weekdays from 2:30 PM (after he finishes trading) to 6:30 AM and all day on weekends, 3 clips per video max (he can press Open/Close on the dashboard); you and the \
 Caption Writer prepare caption (hook, call to action, 3–5 hashtags), platform and time; he \
 approves on Your Desk; the Courier posts to Instagram + YouTube through Upload-Post (free \
 plan: 10 posts a month); TikTok he posts by hand. He also sells coloring books on Amazon KDP \
@@ -1594,7 +1594,7 @@ def gate_public():
             "in_window": in_clip_window(),
             "next_open": nice_dt(next_window_open()) if not is_open else "",
             "closes": nice_dt(_next_flip(now(), False)) if is_open and not g.get("manual") == "open" else "",
-            "hours": "Weekdays 2:30 PM to 6 AM · weekends all day"}
+            "hours": "Weekdays 2:30 PM to 6:30 AM · weekends all day"}
 
 
 LOG_POS = {"pos": None}
