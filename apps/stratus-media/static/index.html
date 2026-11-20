@@ -497,9 +497,11 @@ const SHEETS = {
           <label class="f">When<input type="datetime-local" data-f="time" value="${esc(c.time || "")}"></label>
           ${c.why ? `<div class="why">Why this time: ${esc(c.why)}</div>` : ""}
           <label class="f">Light background music ${S.music_ready ? "" : "<span style='color:var(--bad)'>(mixer not installed)</span>"}${musicSelect(c.music || "none", c.id)}</label>
+          <label class="f">🗣️ Voice saying a line (optional, free Mac voice)<textarea data-f="voice_text" rows="2" placeholder="e.g. Wait for what he does next…">${esc(c.voice_text || "")}</textarea></label>
+          ${(S.voices || []).length ? `<label class="f">Voice<select data-f="voice">${S.voices.map(v => `<option ${(c.voice || S.voices[0]) === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>` : ""}
           <div class="row">
             <button class="btn go" data-approve="${esc(c.id)}">Approve</button>
-            <button class="btn sm" data-preview="${esc(c.id)}">Hear with music</button>
+            <button class="btn sm" data-preview="${esc(c.id)}">Preview sound</button>
             <button class="btn sm" data-redo="${esc(c.id)}">Redo…</button>
             <button class="btn bad sm" data-skip="${esc(c.id)}">Skip</button></div>
         </div></div>`).join("");
@@ -952,10 +954,12 @@ document.addEventListener("click", async e => {
     caption: $("[data-f=caption]", card).value, hashtags: $("[data-f=hashtags]", card).value,
     time: $("[data-f=time]", card).value,
     platforms: [...card.querySelectorAll(".chip.on")].map(c => c.dataset.plat),
-    music: $("[data-music]", card).value
+    music: $("[data-music]", card).value,
+    voice_text: $("[data-f=voice_text]", card).value,
+    voice: ($("[data-f=voice]", card) || {}).value
   });
   if (d.approve) { const v = read(); if (!v.platforms.length) return toast("Pick at least one platform."); return api("/api/approve", v); }
-  if (d.preview) { const v = read(); if (v.music === "none") v.music = "auto"; toast("Mixing music…"); const j = await api("/api/music-preview", {id: v.id, music: v.music}); if (j.ok) toast("Press play to hear it with " + j.track); return; }
+  if (d.preview) { const v = read(); if (v.music === "none" && !v.voice_text.trim()) v.music = "auto"; toast("Mixing…"); const j = await api("/api/music-preview", {id: v.id, music: v.music, voice_text: v.voice_text, voice: v.voice}); if (j.ok) toast("Press play to hear it" + (j.track ? " with " + j.track : "") + (v.voice_text.trim() ? " and the voice line" : "")); return; }
   if (d.skip) return api("/api/skip", {id: d.skip});
   if (d.redo) {
     const box = document.createElement("div"); box.className = "box";

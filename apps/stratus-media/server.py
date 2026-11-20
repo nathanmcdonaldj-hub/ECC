@@ -466,7 +466,7 @@ def scan_clips():
 def clip_public(rec):
     out = {k: rec.get(k) for k in (
         "id", "source", "num", "status", "caption", "hashtags", "platforms",
-        "time", "why", "music", "notes", "posted_at", "results", "missing",
+        "time", "why", "music", "voice_text", "voice", "notes", "posted_at", "results", "missing",
         "tiktok_done", "redo", "metrics", "metrics_at")}
     out["video_url"] = "/media?f=" + urllib.parse.quote(rec["id"])
     out["thumb_url"] = ("/media?thumb=1&f=" + urllib.parse.quote(rec["id"])) if rec.get("thumb") else None
@@ -510,41 +510,119 @@ def pick_auto_track(rec):
     return tracks[hash(rec["id"]) % len(tracks)]
 
 
+_VOICES = None
+VOICE_PREF = ("Samantha", "Daniel", "Karen", "Moira", "Alex", "Tessa", "Fred")
+
+
+def list_voices():
+    """English voices built into the Mac (free, offline). Cached after the first look."""
+    global _VOICES
+    if _VOICES is not None:
+        return _VOICES
+    names = []
+    say = shutil.which("say") or ("/usr/bin/say" if os.path.exists("/usr/bin/say") else None)
+    if say:
+        try:
+            res = subprocess.run([say, "-v", "?"], capture_output=True, text=True, timeout=20)
+            for line in res.stdout.splitlines():
+                m = re.match(r"^(.+?)\s{2,}(en_[A-Za-z]+)\s", line)
+                if m:
+                    names.append(m.group(1).strip())
+        except (OSError, subprocess.SubprocessError):
+            names = []
+    names.sort(key=lambda n: (VOICE_PREF.index(n) if n in VOICE_PREF else len(VOICE_PREF), n))
+    _VOICES = names
+    return names
+
+
+def make_voice(text, voice, out_path):
+    """Speak the line with the Mac's own voice (the `say` tool) into an audio file."""
+    say = shutil.which("say") or ("/usr/bin/say" if os.path.exists("/usr/bin/say") else None)
+    if not say:
+        raise RuntimeError("no-say")
+    txt = out_path + ".txt"
+    with open(txt, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    cmd = [say, "-o", out_path, "-f", txt]
+    if voice and voice in list_voices():
+        cmd[1:1] = ["-v", voice]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    finally:
+        try:
+            os.remove(txt)
+        except OSError:
+            pass
+    if res.returncode != 0 or not os.path.exists(out_path):
+        raise RuntimeError("say:" + (res.stderr or "").strip()[-200:])
+    return out_path
+
+
+def wants_mix(rec):
+    return (rec.get("music") or "none") != "none" or bool((rec.get("voice_text") or "").strip())
+
+
 def mix_music(rec):
-    """Mix a light, ducked music bed under the clip. Returns the output path."""
+    """Build the final clip: optional light music bed and optional spoken voice line.
+    Music sits at ~15% and dips when people talk; the clip's own sound dips while the voice speaks.
+    Returns the output path, or None when there's nothing to add."""
     choice = rec.get("music") or "none"
-    if choice == "none":
+    line = (rec.get("voice_text") or "").strip()
+    if choice == "none" and not line:
         return None
-    track = pick_auto_track(rec) if choice == "auto" else choice
-    if not track:
-        raise RuntimeError("no-tracks")
-    track_path = os.path.join(CONFIG["music_dir"], track)
-    if not os.path.exists(track_path):
-        raise RuntimeError("missing-track:" + track)
     ff = find_ffmpeg()
     if not ff:
         raise RuntimeError("no-ffmpeg")
+    track_path = None
+    if choice != "none":
+        track = pick_auto_track(rec) if choice == "auto" else choice
+        if not track:
+            raise RuntimeError("no-tracks")
+        track_path = os.path.join(CONFIG["music_dir"], track)
+        if not os.path.exists(track_path):
+            raise RuntimeError("missing-track:" + track)
     base, _ = os.path.splitext(rec["file"])
     out = base + ".music.mp4"
-    # Music at ~15% and pushed further down whenever someone speaks.
-    filt = ("[1:a]volume=0.15,afade=t=in:d=1[m];"
-            "[m][0:a]sidechaincompress=threshold=0.03:ratio=6:release=400[duck];"
-            "[0:a][duck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]")
-    cmd = [ff, "-y", "-loglevel", "error", "-i", rec["file"], "-stream_loop", "-1",
-           "-i", track_path, "-filter_complex", filt, "-map", "0:v", "-map", "[a]",
-           "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", out]
+    inputs = ["-i", rec["file"]]
+    parts = []
+    mix = []
+    orig = "[0:a]"
+    if line:
+        vfile = make_voice(line, rec.get("voice"), base + ".voice.aiff")
+        vi = len(inputs) // 2
+        inputs += ["-i", vfile]
+        parts.append("[{}:a]aresample=48000,adelay=400|400,volume=1.8,asplit=2[vo][vkey]".format(vi))
+        parts.append("[0:a][vkey]sidechaincompress=threshold=0.02:ratio=10:attack=20:release=350[orig]")
+        orig = "[orig]"
+        mix.append("[vo]")
+    if track_path:
+        mi = len(inputs) // 2
+        inputs = inputs + ["-stream_loop", "-1", "-i", track_path]
+        parts.append("[{}:a]volume=0.15,afade=t=in:d=1[m]".format(mi))
+        parts.append("[m][0:a]sidechaincompress=threshold=0.03:ratio=6:release=400[duck]")
+        mix.append("[duck]")
+    parts.append("{}{}amix=inputs={}:duration=first:dropout_transition=0:normalize=0[a]"
+                 .format(orig, "".join(mix), 1 + len(mix)))
+    cmd = [ff, "-y", "-loglevel", "error"] + inputs + [
+        "-filter_complex", ";".join(parts), "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", out]
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if res.returncode != 0:
         raise RuntimeError("ffmpeg:" + res.stderr.strip()[-300:])
     rec["music_file"] = out
-    rec["music_track"] = track
+    rec["music_track"] = os.path.basename(track_path) if track_path else None
     return out
 
 
 def music_error(rec, exc):
     code = str(exc)
     name = "clip {} from {}".format(rec.get("num"), rec.get("source"))
-    if code == "no-tracks":
+    if code == "no-say" or code.startswith("say:"):
+        raise_error("Your Desk", "Couldn't make the voice line",
+                    "The Mac's built-in voice couldn't read the line on {}.".format(name),
+                    "Try a different voice, or clear the voice line to post without it.",
+                    key="voice:fail:" + rec["id"])
+    elif code == "no-tracks":
         raise_error("Your Desk", "No music tracks yet",
                     "You asked for music on {}, but the music folder is empty.".format(name),
                     "Add a few royalty-free songs to Movies → Stratus Music, or pick “No music”.",
@@ -619,7 +697,7 @@ def post_clip(rec):
                     "Put the file back, or Skip this clip.", key="post:missing:" + rec["id"])
         return False
     path = rec["file"]
-    if rec.get("music", "none") != "none":
+    if wants_mix(rec):
         try:
             path = mix_music(rec)
         except Exception as exc:  # noqa: BLE001 - shown to the user in plain words
@@ -1306,7 +1384,7 @@ def write_redo(rec, note):
     persist()
 
 
-def apply_schedule(clip_id, time_s, platforms, caption, hashtags, music):
+def apply_schedule(clip_id, time_s, platforms, caption, hashtags, music, voice_text=None, voice=None):
     rec = STATE["clips"].get(clip_id)
     if not rec:
         return False, "Clip not found."
@@ -1321,6 +1399,11 @@ def apply_schedule(clip_id, time_s, platforms, caption, hashtags, music):
     if music is not None:
         rec["music"] = music
         rec.pop("music_file", None)
+    if voice_text is not None:
+        rec["voice_text"] = voice_text.strip()[:400]
+        rec.pop("music_file", None)
+    if voice is not None:
+        rec["voice"] = voice
     rec["status"] = "scheduled"
     rec["approved_at"] = now_iso()
     if "tiktok" in rec["platforms"]:
@@ -1428,6 +1511,7 @@ def build_state(for_model=False):
         "creations": [create_public(c) for c in STATE.get("creations", [])[-20:]][::-1],
         "music": list_music(),
         "music_ready": bool(find_ffmpeg()),
+        "voices": list_voices(),
         "chat_model": STATE["chat"].get("model") or CONFIG["default_model"],
         "models": CONFIG["models"],
         "chat_log": STATE["chat"].get("log", [])[-30:],
@@ -1879,7 +1963,8 @@ def r_link(d):
 def r_approve(d):
     with LOCK:
         ok, msg = apply_schedule(d.get("id"), d.get("time"), d.get("platforms") or [],
-                                 d.get("caption"), d.get("hashtags"), d.get("music"))
+                                 d.get("caption"), d.get("hashtags"), d.get("music"),
+                                 d.get("voice_text"), d.get("voice"))
     return {"ok": ok, "message": msg}
 
 
@@ -1956,12 +2041,18 @@ def r_music_preview(d):
         rec = STATE["clips"].get(d.get("id"))
         if not rec:
             return {"ok": False, "message": "Clip not found."}
-        rec["music"] = d.get("music") or "auto"
+        rec["music"] = d.get("music") or "none"
+        if d.get("voice_text") is not None:
+            rec["voice_text"] = (d.get("voice_text") or "").strip()[:400]
+        if d.get("voice") is not None:
+            rec["voice"] = d.get("voice")
+        if not wants_mix(rec):
+            return {"ok": False, "message": "Pick music or type a voice line first."}
     try:
         mix_music(rec)
     except Exception as exc:  # noqa: BLE001
         music_error(rec, exc)
-        return {"ok": False, "message": "Couldn't add music. The red banner says why."}
+        return {"ok": False, "message": "Couldn't build the preview. The red banner says why."}
     persist()
     return {"ok": True, "url": clip_public(rec).get("music_url"), "track": rec.get("music_track")}
 
