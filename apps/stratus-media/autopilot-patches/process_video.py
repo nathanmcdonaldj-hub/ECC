@@ -41,7 +41,7 @@ EXIT_RETRY = 75   # night_run.sh: hide failed, leave it in the queue for the nex
 # that show the game itself are kept (no tweets, web pages, desktop, just-chatting).
 GAME_FILE = os.path.join(HOME, "Movies", "Clip Inbox", "gameplay.json")
 GAME_CANDIDATES = 8
-GEMINI_MODEL = os.environ.get("STRATUS_GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.environ.get("STRATUS_GEMINI_MODEL", "gemini-3.1-flash-lite")
 GAME_PROMPT = ("These are {n} frames from one short clip of a livestream. For EACH frame decide if it mainly shows "
                "video game play (the game world, game HUD, cutscene or game menu). NOT game play: a desktop or file "
                "window, a web page, social media posts or tweets, a chat window, a video player showing something "
