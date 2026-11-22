@@ -412,6 +412,7 @@ def scan_clips():
     """Find new clips in Clips Ready and add them to the queue."""
     root = CONFIG["clips_ready"]
     found = {}
+    hunted_cache = {}
     try:
         videos = sorted(os.listdir(root))
     except OSError:
@@ -440,6 +441,14 @@ def scan_clips():
                 "notes": notes.get(num) or notes.get(0, ""),
                 "mtime": os.path.getmtime(os.path.join(vdir, f)),
             }
+            hunted = hunted_cache.setdefault(vdir, hunter_source(vdir))
+            if hunted:
+                found[cid]["notes"] = ("Clip Hunter find from {plat}. Creator: {c} ({u}). Credit and tag them in the caption "
+                                       "as @{h}. Original title: {t}\n").format(
+                    plat=hunted["platform"].title(), c=hunted["creator"], u=hunted.get("creator_url") or "",
+                    h=re.sub(r"[^A-Za-z0-9_.]", "", hunted["creator"]), t=hunted["title"]) + found[cid]["notes"]
+                found[cid]["hunter"] = True
+                found[cid]["creator"] = hunted["creator"]
     with LOCK:
         for cid, info in found.items():
             rec = STATE["clips"].get(cid)
@@ -454,6 +463,8 @@ def scan_clips():
                 rec.update({"status": "new", "caption": "", "hashtags": "", "why": "", "added": now_iso()})
                 rec.pop("skipped_at", None)
             rec.update({k: info[k] for k in ("id", "source", "file", "thumb", "num", "notes", "mtime")})
+            if info.get("hunter"):
+                rec["hunter"], rec["creator"] = True, info.get("creator")
             rec["missing"] = False
         for cid, rec in STATE["clips"].items():
             if rec.get("source") == "UGC":   # made videos live in UGC Videos, not the clip folder
@@ -1410,6 +1421,9 @@ def write_captions(force_ids=None):
         return 0
     listing = "\n\n".join("id: {}\nsource video: {}\nnotes: {}".format(
         r["id"], r["source"], (r.get("notes") or "(no notes)")[:1200]) for r in todo[:6])
+    lessons = hunter().get("lessons") or []
+    if lessons and any(r.get("hunter") for r in todo[:6]):
+        listing += "\n\nLessons from his past Clip Hunter posts (use them):\n- " + "\n- ".join(lessons)
     earliest = (now() + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
     model = STATE["chat"].get("model") or CONFIG["default_model"]
     try:
@@ -1616,6 +1630,9 @@ def build_state(for_model=False):
         "books": STATE["books"],
         "ugc": STATE["ugc"][-20:],
         "creations": [create_public(c) for c in STATE.get("creations", [])[-20:]][::-1],
+        "warmup": warmup_public(STATE.get("warmup")),
+        "hunter": hunter_public(),
+        "warmup_history": STATE.get("warmup_history", [])[::-1],
         "music": list_music(),
         "music_ready": bool(find_ffmpeg()),
         "voices": voice_options(),
@@ -1672,11 +1689,18 @@ def background_loop():
                 if "tiktok" in rec.get("platforms", []) and not rec.get("tiktok_done"):
                     notify_mac("Stratus House · TikTok Runner",
                                "Time to post clip {} on TikTok. Open the dashboard to copy the caption.".format(rec.get("num")))
+            h = hunter()
+            if h.get("on") and not _HUNT["running"]:
+                last = h.get("last_run") or ""
+                due_at = (now() - timedelta(hours=h.get("every", 2))).strftime("%Y-%m-%dT%H:%M:%S")
+                if not last or last <= due_at:
+                    threading.Thread(target=run_hunter, daemon=True).start()
             if time.time() - last_stats > 6 * 3600:
                 last_stats = time.time()
                 if STATE["posts"]:
                     fetch_stats()
                     fetch_post_stats()
+                    hunter_lessons()
             persist()
         except Exception:  # noqa: BLE001 - the loop must keep running
             sys.stderr.write("[StratusMedia] loop error\n" + traceback.format_exc())
@@ -2808,6 +2832,511 @@ def resume_creations():
                 c["status"], c["error"] = "failed", "The dashboard restarted before it started. Nothing was charged. Press Try again."
 
 
+# ---------------------------------------------------------------- Warm-Up (14 days, by hand)
+
+WARMUP_DAYS = 14
+WARMUP_SYSTEM = (
+    "You coach Mr. McDonald (brand: Stratus House) through a 14-day account warm-up for a new niche on short-video apps. "
+    "He does every step BY HAND on his phone: no bots, no automation, no follow-for-follow, no copy-paste spam. "
+    "Each day must take about 10 minutes. Keep it safe for the apps: at most 10 follows and 10 comments a day, "
+    "real comments that add something, no links in comments. Plain words, short lines, no jargon. "
+    "Reply with JSON only, no other text: {"
+    "\"hashtags\": 8 hashtags to search for this niche (strings with #), "
+    "\"accounts\": 5 short descriptions of the kinds of accounts to follow (e.g. 'small dog trainers posting daily'), "
+    "\"comments\": 8 short, genuine comment ideas he can adapt (no emojis spam, no 'follow me'), "
+    "\"days\": a list of EXACTLY 14 days, each a list of 4 to 6 tasks; each task is {\"t\": one short instruction, \"m\": minutes as a number}; "
+    "the minutes for each day add up to about 10. Days 1-3: set up the profile for the niche and teach the feed by watching and saving; "
+    "days 4-10: search hashtags, follow a few, leave real comments, reply to comments; days 11-14: keep engaging and post or share niche content. "
+    "Mention which app only when it matters.}")
+
+
+def warmup_day(w):
+    try:
+        start = datetime.strptime(w["started"], "%Y-%m-%d").date()
+    except (KeyError, ValueError):
+        return 1
+    return max(1, (now().date() - start).days + 1)
+
+
+def warmup_numbers():
+    st = summarize_stats()
+    return {"followers": dict(st.get("followers") or {}), "views": st.get("views"), "at": now_iso()}
+
+
+def warmup_public(w):
+    if not w:
+        return None
+    day = warmup_day(w)
+    out = {k: w.get(k) for k in ("niche", "platforms", "started", "hashtags", "accounts", "comments", "before", "manual", "status")}
+    out["day"] = min(day, WARMUP_DAYS)
+    out["over"] = day > WARMUP_DAYS
+    out["days"] = []
+    for i, tasks in enumerate(w["days"], 1):
+        done = sum(1 for t in tasks if t.get("done"))
+        state = "done" if done == len(tasks) else ("today" if i == day else ("missed" if i < day else "later"))
+        out["days"].append({"n": i, "tasks": tasks, "done": done, "state": state})
+    streak = 0
+    for i in range(min(day, WARMUP_DAYS), 0, -1):
+        if out["days"][i - 1]["state"] == "done":
+            streak += 1
+        elif i == day:
+            continue  # today isn't finished yet: it doesn't break the streak
+        else:
+            break
+    out["streak"] = streak
+    out["now"] = warmup_numbers()
+    return out
+
+
+def r_warmup_start(d):
+    niche = (d.get("niche") or "").strip()[:120]
+    if len(niche) < 3:
+        return {"ok": False, "message": "Type the niche first, like “dog training” or “anti-aging”."}
+    plats = [p for p in (d.get("platforms") or []) if p in ("instagram", "tiktok", "youtube")] or ["instagram", "tiktok"]
+    user = "New niche: {}\nApps he is warming up: {}".format(niche, ", ".join(plats))
+    try:
+        resp = call_claude({"max_tokens": 3500, "system": WARMUP_SYSTEM,
+                            "messages": [{"role": "user", "content": user}]},
+                           STATE["chat"].get("model") or CONFIG["default_model"])
+        txt = text_of(resp.get("content", []))
+        m = re.search(r"\{.*\}", txt, re.S)
+        plan = json.loads(m.group(0)) if m else {}
+        days = []
+        for day in (plan.get("days") or [])[:WARMUP_DAYS]:
+            tasks = []
+            for t in day[:6]:
+                if isinstance(t, dict) and str(t.get("t") or "").strip():
+                    try:
+                        mins = max(1, min(10, int(float(t.get("m") or 2))))
+                    except (TypeError, ValueError):
+                        mins = 2
+                    tasks.append({"t": str(t["t"]).strip()[:200], "m": mins, "done": False})
+                elif isinstance(t, str) and t.strip():
+                    tasks.append({"t": t.strip()[:200], "m": 2, "done": False})
+            if tasks:
+                days.append(tasks)
+        if len(days) < WARMUP_DAYS:
+            raise ValueError("short")
+    except ClaudeError as exc:
+        claude_error_to_alert("Warm-Up Coach", exc)
+        return {"ok": False, "message": "Your manager couldn't write the plan. See the alert at the top."}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return {"ok": False, "message": "The plan came back garbled. Press Start again."}
+    w = {"niche": niche, "platforms": plats, "started": now().strftime("%Y-%m-%d"), "status": "on",
+         "hashtags": [str(x).strip()[:60] for x in (plan.get("hashtags") or [])][:10],
+         "accounts": [str(x).strip()[:160] for x in (plan.get("accounts") or [])][:6],
+         "comments": [str(x).strip()[:200] for x in (plan.get("comments") or [])][:10],
+         "days": days, "before": warmup_numbers(), "manual": {}}
+    with LOCK:
+        old = STATE.get("warmup")
+        if old:
+            STATE.setdefault("warmup_history", []).append(_warmup_summary(old))
+        STATE["warmup"] = w
+        persist()
+    return {"ok": True, "message": "Day 1 is ready. About 10 minutes."}
+
+
+def _warmup_summary(w):
+    pub = warmup_public(w)
+    return {"niche": w["niche"], "started": w["started"], "ended": now().strftime("%Y-%m-%d"),
+            "days_done": sum(1 for x in pub["days"] if x["state"] == "done"),
+            "before": w.get("before"), "after": pub["now"], "manual": w.get("manual")}
+
+
+def r_warmup_check(d):
+    with LOCK:
+        w = STATE.get("warmup")
+        if not w:
+            return {"ok": False}
+        try:
+            task = w["days"][int(d.get("day")) - 1][int(d.get("i"))]
+        except (TypeError, ValueError, IndexError):
+            return {"ok": False}
+        task["done"] = bool(d.get("done"))
+        persist()
+    return {"ok": True}
+
+
+def r_warmup_log(d):
+    """He types his follower count for an app (TikTok isn't tracked automatically)."""
+    plat = d.get("platform")
+    try:
+        n = int(str(d.get("followers")).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return {"ok": False, "message": "Type just the number, like 152."}
+    if plat not in ("instagram", "tiktok", "youtube") or n < 0:
+        return {"ok": False}
+    with LOCK:
+        w = STATE.get("warmup")
+        if not w:
+            return {"ok": False}
+        rec = w.setdefault("manual", {}).setdefault(plat, {})
+        rec.setdefault("first", n)
+        rec["first_at"] = rec.get("first_at") or now().strftime("%Y-%m-%d")
+        rec["latest"], rec["latest_at"] = n, now().strftime("%Y-%m-%d")
+        persist()
+    return {"ok": True, "message": "Saved."}
+
+
+def r_warmup_stop(d):
+    with LOCK:
+        w = STATE.get("warmup")
+        if w:
+            STATE.setdefault("warmup_history", []).append(_warmup_summary(w))
+            STATE["warmup_history"] = STATE["warmup_history"][-10:]
+            STATE["warmup"] = None
+            persist()
+    return {"ok": True, "message": "Warm-up finished and saved."}
+
+
+# ---------------------------------------------------------------- Clip Hunter
+# Every few hours: find hot new clips for his subject on Twitch or YouTube, skip ones other pages
+# already reposted, and drop the best few into the Clip Inbox. The normal clipper edits them
+# (captions, hook, facecam layout) and they land at Your Desk. Nothing posts without his OK.
+
+HUNT_MAX_ITEMS = 80
+HUNT_INBOX_CAP = 4          # don't pile more than this many hunter links in the inbox at once
+_HUNT = {"running": False, "token": None, "token_exp": 0.0}
+
+HUNT_PROFILE_SYSTEM = (
+    "You help a short-video clipping tool. Given a subject he typed, reply with JSON only: "
+    "{\"is_game\": true if the subject is a specific video game (or a game series), "
+    "\"twitch_category\": the exact Twitch category name for that game (e.g. 'Grand Theft Auto VI'), or null, "
+    "\"twitch_search\": 1-3 words to find Twitch channels about the subject when it is not a game (e.g. 'dog training'), "
+    "\"youtube_query\": the best YouTube search words for fresh, popular videos on the subject, "
+    "\"label\": a short clean name for the subject}.")
+
+HUNT_LESSONS_SYSTEM = (
+    "You review how Mr. McDonald's reposted short clips performed. Reply with JSON only: "
+    "{\"lessons\": 3 to 6 short, specific lessons (max 14 words each) about what got more views, "
+    "likes or comments, to guide which clips to pick and how to caption them next time}.")
+
+
+def hunter():
+    h = STATE.setdefault("hunter", {})
+    h.setdefault("on", False)
+    h.setdefault("platform", "twitch")
+    h.setdefault("subject", "")
+    h.setdefault("every", 2)
+    h.setdefault("per_run", 2)
+    h.setdefault("items", [])
+    h.setdefault("seen", {})
+    h.setdefault("lessons", [])
+    return h
+
+
+def find_ytdlp():
+    for c in (os.path.join(APP_DIR, "bin", "yt-dlp"), shutil.which("yt-dlp"),
+              "/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp"):
+        if c and os.path.exists(c) and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def ytdlp_json(args, timeout=120):
+    yd = find_ytdlp()
+    if not yd:
+        raise RuntimeError("no-ytdlp")
+    res = subprocess.run([yd, "--flat-playlist", "-J", "--no-warnings", "--ignore-errors"] + args,
+                         capture_output=True, text=True, timeout=timeout)
+    try:
+        return json.loads(res.stdout or "{}")
+    except ValueError:
+        raise RuntimeError("ytdlp:" + (res.stderr or "")[-200:])
+
+
+def twitch_keys():
+    sec = secrets()
+    return sec.get("twitch_client_id"), sec.get("twitch_client_secret")
+
+
+def twitch_get(path, params):
+    cid, csec = twitch_keys()
+    if not (cid and csec):
+        raise RuntimeError("no-twitch")
+    if not _HUNT["token"] or time.time() > _HUNT["token_exp"] - 300:
+        q = urllib.parse.urlencode({"client_id": cid, "client_secret": csec, "grant_type": "client_credentials"})
+        req = urllib.request.Request("https://id.twitch.tv/oauth2/token?" + q, data=b"", method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                tok = json.loads(r.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError("twitch-auth:{}".format(exc.code))
+        _HUNT["token"], _HUNT["token_exp"] = tok["access_token"], time.time() + int(tok.get("expires_in", 3600))
+    url = "https://api.twitch.tv/helix/" + path + "?" + urllib.parse.urlencode(params, doseq=True)
+    req = urllib.request.Request(url, headers={"Client-Id": cid, "Authorization": "Bearer " + _HUNT["token"]})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read().decode()).get("data") or []
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            _HUNT["token"] = None
+        raise RuntimeError("twitch:{}".format(exc.code))
+
+
+def hunt_profile(subject):
+    """Ask Claude once per subject whether it's a game and how to search for it."""
+    h = hunter()
+    prof = h.get("profile") or {}
+    if prof.get("subject") == subject:
+        return prof
+    try:
+        resp = call_claude({"max_tokens": 300, "system": HUNT_PROFILE_SYSTEM,
+                            "messages": [{"role": "user", "content": "Subject: " + subject}]},
+                           CONFIG["models"][-1] if CONFIG.get("models") else CONFIG["default_model"])
+        m = re.search(r"\{.*\}", text_of(resp.get("content", [])), re.S)
+        data = json.loads(m.group(0)) if m else {}
+    except (ClaudeError, ValueError):
+        data = {}
+    prof = {"subject": subject, "is_game": bool(data.get("is_game")),
+            "twitch_category": data.get("twitch_category") or None,
+            "twitch_search": data.get("twitch_search") or subject,
+            "youtube_query": data.get("youtube_query") or subject,
+            "label": data.get("label") or subject, "game_id": None, "game_name": None}
+    if prof["is_game"] and all(twitch_keys()):
+        try:
+            for name in [prof["twitch_category"], subject]:
+                if not name:
+                    continue
+                cats = twitch_get("search/categories", {"query": name, "first": 10})
+                pick = next((c for c in cats if c["name"].lower() == name.lower()), cats[0] if cats else None)
+                if pick:
+                    prof["game_id"], prof["game_name"] = pick["id"], pick["name"]
+                    break
+        except RuntimeError:
+            pass
+    with LOCK:
+        h["profile"] = prof
+        persist()
+    return prof
+
+
+def _iso_utc(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def twitch_candidates(prof):
+    since = _iso_utc(datetime.utcnow() - timedelta(hours=24))
+    clips = []
+    if prof.get("game_id"):
+        clips = twitch_get("clips", {"game_id": prof["game_id"], "started_at": since, "first": 40})
+    else:
+        chans = twitch_get("search/channels", {"query": prof["twitch_search"], "first": 8})
+        for ch in chans[:5]:
+            try:
+                clips += twitch_get("clips", {"broadcaster_id": ch["id"], "started_at": since, "first": 10})
+            except RuntimeError:
+                continue
+    out = []
+    for c in clips:
+        if c.get("language") and not str(c["language"]).startswith("en"):
+            continue
+        if float(c.get("duration") or 0) < 8:
+            continue
+        name = c.get("broadcaster_name") or ""
+        out.append({"key": "tw:" + c["id"], "url": c["url"], "title": c.get("title") or "",
+                    "creator": name, "creator_url": "https://twitch.tv/" + name.lower(),
+                    "views": int(c.get("view_count") or 0), "thumb": c.get("thumbnail_url"),
+                    "made": c.get("created_at"), "platform": "twitch", "length": c.get("duration")})
+    out.sort(key=lambda x: -x["views"])
+    return out
+
+
+def youtube_candidates(prof):
+    data = ytdlp_json(["--playlist-end", "30", "ytsearchdate30:" + prof["youtube_query"]])
+    out = []
+    for e in data.get("entries") or []:
+        dur = e.get("duration") or 0
+        if not e.get("id") or (dur and (dur < 120 or dur > 90 * 60)):
+            continue   # skip Shorts and very long streams (too heavy for this Mac)
+        thumbs = e.get("thumbnails") or []
+        out.append({"key": "yt:" + e["id"], "url": "https://www.youtube.com/watch?v=" + e["id"],
+                    "title": e.get("title") or "", "creator": e.get("channel") or e.get("uploader") or "",
+                    "creator_url": e.get("channel_url") or e.get("uploader_url") or "",
+                    "views": int(e.get("view_count") or 0), "thumb": thumbs[-1]["url"] if thumbs else None,
+                    "made": None, "platform": "youtube", "length": dur})
+    out.sort(key=lambda x: -x["views"])
+    return out
+
+
+def already_reposted(item):
+    """True when another page already put this Twitch moment up as a Short (title match)."""
+    import difflib
+    try:
+        data = ytdlp_json(["--playlist-end", "8", "ytsearch8:{} {}".format(item["title"], item["creator"])], timeout=60)
+    except RuntimeError:
+        return False
+    want = re.sub(r"[^a-z0-9 ]", "", item["title"].lower())
+    if len(want) < 6:
+        return False
+    for e in data.get("entries") or []:
+        got = re.sub(r"[^a-z0-9 ]", "", (e.get("title") or "").lower())
+        if (e.get("duration") or 0) <= 90 and difflib.SequenceMatcher(None, want, got).ratio() >= 0.6:
+            return True
+    return False
+
+
+def hunter_pending():
+    urls = {i["url"] for i in hunter()["items"] if i.get("state") == "sent"}
+    return [x for x in list_inbox() if x["kind"] == "link" and x["name"] in urls]
+
+
+def run_hunter(manual=False):
+    h = hunter()
+    if _HUNT["running"]:
+        return
+    _HUNT["running"] = True
+    try:
+        subject = (h.get("subject") or "").strip()
+        plat = h.get("platform")
+        note = ""
+        sent = 0
+        if not subject:
+            note = "Type a subject first."
+        elif plat == "instagram":
+            note = "Instagram doesn't allow free searching yet. Switch to Twitch or YouTube."
+        elif plat == "twitch" and not all(twitch_keys()):
+            note = "Twitch needs its one-time setup (the yellow box)."
+        elif len(hunter_pending()) >= HUNT_INBOX_CAP:
+            note = "The clipper still has {} hunted videos to finish. I'll look again next time.".format(len(hunter_pending()))
+        else:
+            prof = hunt_profile(subject)
+            try:
+                cands = twitch_candidates(prof) if plat == "twitch" else youtube_candidates(prof)
+            except RuntimeError as exc:
+                code = str(exc)
+                cands = []
+                note = {"no-ytdlp": "The YouTube finder tool isn't installed yet. Ask Claude.",
+                        "no-twitch": "Twitch needs its one-time setup (the yellow box)."}.get(
+                    code, "Twitch said no to the keys. Check them in the yellow box." if code.startswith("twitch-auth")
+                    else "Couldn't search right now ({}). I'll try again next time.".format(code[:60]))
+            fresh = [c for c in cands if c["key"] not in h["seen"]]
+            found = []
+            for c in fresh[:12]:
+                if sent >= int(h.get("per_run") or 2):
+                    break
+                c["found_at"] = now_iso()
+                h["seen"][c["key"]] = now_iso()
+                if plat == "twitch" and already_reposted(c):
+                    c.update(state="skipped", why="Another page already posted this one")
+                    found.append(c)
+                    continue
+                ok, _ = add_link(c["url"], False, bool(prof.get("is_game")))
+                c.update(state="sent" if ok else "skipped", why="Sent to the clipper" if ok else "Couldn't add it")
+                sent += 1 if ok else 0
+                found.append(c)
+            if cands and not note:
+                note = "Found {} new, sent {} to the clipper.".format(len(fresh), sent) if fresh else \
+                    "Nothing new since last time."
+            with LOCK:
+                h["items"] = (found + h["items"])[:HUNT_MAX_ITEMS]
+                # keep the seen list from growing forever
+                cutoff = (now() - timedelta(days=14)).strftime("%Y-%m-%dT%H:%M:%S")
+                h["seen"] = {k: v for k, v in h["seen"].items() if v >= cutoff}
+        with LOCK:
+            h["last_run"] = now_iso()
+            h["last_note"] = note
+            persist()
+        if sent:
+            notify_mac("Stratus House · Clip Hunter", "Found {} hot clip(s). They'll be at Your Desk after clipping.".format(sent))
+    finally:
+        _HUNT["running"] = False
+
+
+def hunter_source(vdir):
+    """The hunted item a Clips Ready folder came from (via clips.json's source link)."""
+    src = (load_json(os.path.join(vdir, "clips.json"), {}) or {}).get("source")
+    if not src:
+        return None
+    return next((i for i in hunter()["items"] if i.get("url") == src), None)
+
+
+def hunter_lessons():
+    h = hunter()
+    if h.get("lessons_at") and h["lessons_at"] > (now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S"):
+        return
+    posted = [r for r in STATE["clips"].values() if r.get("hunter") and r.get("status") in ("posted", "partial") and r.get("metrics")]
+    if len(posted) < 3 or not secrets().get("anthropic_key"):
+        return
+    rows = []
+    for r in posted[-20:]:
+        tot = {}
+        for m in (r.get("metrics") or {}).values():
+            for k in ("views", "likes", "comments", "shares"):
+                if isinstance(m.get(k), (int, float)):
+                    tot[k] = tot.get(k, 0) + m[k]
+        rows.append("creator: {} | caption: {} | {}".format(r.get("creator") or "?", (r.get("caption") or "")[:120],
+                                                            ", ".join("{} {}".format(v, k) for k, v in tot.items())))
+    try:
+        resp = call_claude({"max_tokens": 500, "system": HUNT_LESSONS_SYSTEM,
+                            "messages": [{"role": "user", "content": "\n".join(rows)}]},
+                           STATE["chat"].get("model") or CONFIG["default_model"])
+        m = re.search(r"\{.*\}", text_of(resp.get("content", [])), re.S)
+        lessons = [str(x).strip() for x in (json.loads(m.group(0)).get("lessons") or [])][:6] if m else []
+    except (ClaudeError, ValueError):
+        return
+    with LOCK:
+        h["lessons_at"] = now_iso()
+        if lessons:
+            h["lessons"] = lessons
+        persist()
+
+
+def hunter_public():
+    h = hunter()
+    prof = h.get("profile") or {}
+    nxt = None
+    if h.get("on") and h.get("last_run"):
+        try:
+            nxt = nice_dt(datetime.strptime(h["last_run"], "%Y-%m-%dT%H:%M:%S") + timedelta(hours=h.get("every", 2)))
+        except ValueError:
+            nxt = None
+    return {k: h.get(k) for k in ("on", "platform", "subject", "every", "per_run", "last_run", "last_note", "lessons")} | {
+        "running": _HUNT["running"], "next": nxt, "items": h["items"][:30],
+        "is_game": bool(prof.get("is_game")) if prof.get("subject") == h.get("subject") else None,
+        "game_name": prof.get("game_name") if prof.get("subject") == h.get("subject") else None,
+        "has_twitch": all(twitch_keys()), "has_ytdlp": bool(find_ytdlp()),
+        "pending": len(hunter_pending()),
+    }
+
+
+def r_hunter_set(d):
+    h = hunter()
+    with LOCK:
+        if d.get("platform") in ("twitch", "youtube", "instagram"):
+            h["platform"] = d["platform"]
+        if "subject" in d:
+            h["subject"] = (d.get("subject") or "").strip()[:80]
+        if d.get("per_run") in (1, 2, 3):
+            h["per_run"] = d["per_run"]
+        if "on" in d:
+            h["on"] = bool(d["on"])
+            if h["on"]:
+                h["last_run"] = None   # run right away
+        persist()
+    for f in ("twitch_client_id", "twitch_client_secret"):
+        if str(d.get(f) or "").strip():
+            save_secret(f, str(d[f]).strip())
+            _HUNT["token"] = None
+    if d.get("twitch_client_id") or d.get("twitch_client_secret"):
+        try:
+            twitch_get("games/top", {"first": 1})
+        except RuntimeError as exc:
+            return {"ok": False, "message": "Twitch didn't accept those keys. Check both and paste again." if "auth" in str(exc)
+                    else "Saved, but Twitch didn't answer right now."}
+        return {"ok": True, "message": "Twitch is connected ✅"}
+    if h.get("subject") and secrets().get("anthropic_key"):
+        threading.Thread(target=hunt_profile, args=(h["subject"],), daemon=True).start()
+    return {"ok": True, "message": ("Clip Hunter is ON. First search starts now." if d.get("on") else "Saved.") if "on" not in d or d["on"] else "Clip Hunter is OFF."}
+
+
+def r_hunter_run(d):
+    if _HUNT["running"]:
+        return {"ok": True, "message": "Already searching."}
+    threading.Thread(target=run_hunter, args=(True,), daemon=True).start()
+    return {"ok": True, "message": "Searching now. Results show in a minute."}
+
+
 ROUTES = {
     "/api/live-refresh": r_live_refresh,
     "/api/clip-gate": r_clip_gate,
@@ -2834,6 +3363,12 @@ ROUTES = {
     "/api/create-edit": r_create_edit,
     "/api/create-make": r_create_make,
     "/api/create-delete": r_create_delete,
+    "/api/warmup-start": r_warmup_start,
+    "/api/warmup-check": r_warmup_check,
+    "/api/warmup-log": r_warmup_log,
+    "/api/warmup-stop": r_warmup_stop,
+    "/api/hunter-set": r_hunter_set,
+    "/api/hunter-run": r_hunter_run,
 }
 
 

@@ -101,6 +101,26 @@ details.pr summary{cursor:pointer;font-size:12px;color:var(--mute);font-weight:8
 .hidesw input:checked+.knob::after{transform:translateX(18px)}
 .hidesw input:focus-visible+.knob{outline:2px solid var(--gold2);outline-offset:2px}
 .hidesw small{display:block;color:var(--mute);font-size:12px;font-weight:600}
+.hflow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;font-weight:800;color:var(--mute)}
+.hflow span{background:var(--navy);border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--ink)}
+.hitem{background:var(--card);border-radius:16px;padding:10px;display:grid;grid-template-columns:112px minmax(0,1fr);gap:10px;align-items:start}
+.hitem img{width:112px;height:63px;object-fit:cover;border-radius:10px;background:var(--navy)}
+.hitem b{font-size:13px;display:block}
+.hitem .meta{font-size:12px;color:var(--mute);font-weight:600}
+.hbadge{display:inline-block;font-size:11px;font-weight:900;padding:3px 9px;border-radius:999px;background:var(--navy);margin-top:4px}
+.hbadge.sent{color:#6be39a}.hbadge.skipped{color:var(--mute)}
+.rules{border-radius:14px;padding:10px 12px;font-size:13px;font-weight:700;background:var(--navy);border:1px solid var(--line)}
+.rules.game{border-color:var(--gold);color:var(--gold2)}
+.steps{margin:0;padding-left:20px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+.wdays{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.wday{border:0;border-radius:10px;padding:8px 0;font-weight:900;font-size:13px;background:var(--navy);color:var(--mute);cursor:pointer}
+.wday.done{background:var(--ok);color:#06210f}.wday.today{outline:2px solid var(--gold);color:var(--gold2)}
+.wday.missed{background:#4a1d27;color:#ff8a8a}.wday.sel{box-shadow:0 0 0 3px #fff inset}
+.wtask{display:flex;gap:10px;align-items:flex-start;background:var(--navy);border-radius:12px;padding:10px 12px;cursor:pointer;font-size:14px}
+.wtask input{width:20px;height:20px;flex:none;margin-top:1px;accent-color:var(--ok)}
+.wtask.done span{text-decoration:line-through;color:var(--mute)}
+.wtask small{margin-left:auto;color:var(--mute);font-weight:800;flex:none}
+.streak{font-size:28px;font-weight:900;color:var(--gold2)}
 .empty{background:var(--card);border-radius:18px;padding:28px;text-align:center;color:var(--mute)}
 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .kpi{background:var(--card);border-radius:16px;padding:12px 14px;border:0;text-align:left}
@@ -235,6 +255,8 @@ body.demo .st.done{opacity:.75}
     <button class="tab on" data-tab="floor" role="tab">🏢 Studio Floor</button>
     <button class="tab" data-tab="live" role="tab">🎬 Live Posts</button>
     <button class="tab" data-tab="create" role="tab">🎥 Create</button>
+    <button class="tab" data-tab="hunter" role="tab">🎯 Clip Hunter</button>
+    <button class="tab" data-tab="warmup" role="tab">🔥 Warm-Up</button>
   </nav>
   <div id="floorView">
   <div class="legend">
@@ -248,6 +270,8 @@ body.demo .st.done{opacity:.75}
   </div>
   <div id="liveView" hidden></div>
   <div id="createView" hidden></div>
+  <div id="hunterView" hidden></div>
+  <div id="warmupView" hidden></div>
 </div>
 <div id="demoRoot"></div>
 <div id="sheetRoot"></div>
@@ -401,6 +425,8 @@ function render() {
   renderGate();
   renderLive(false);
   renderCreate(false);
+  renderHunter(false);
+  renderWarmup(false);
   document.title = (S.clips_waiting.length ? `(${S.clips_waiting.length}) ` : "") + "Stratus House Media";
   $("#errs").innerHTML = S.errors.map(e => `
     <div class="err" role="alert"><span class="ic">!</span>
@@ -775,6 +801,9 @@ function setTab(t) {
   tab = t; try { localStorage.setItem("tab", t); } catch (e) {}
   document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
   $("#floorView").hidden = t !== "floor"; $("#liveView").hidden = t !== "live"; $("#createView").hidden = t !== "create";
+  $("#hunterView").hidden = t !== "hunter"; $("#warmupView").hidden = t !== "warmup";
+  if (t === "hunter") renderHunter(true);
+  if (t === "warmup") renderWarmup(true);
   if (t === "live") renderLive(true);
   if (t === "create") renderCreate(true);
 }
@@ -814,7 +843,7 @@ function renderLive(force) {
   lastLive = html; $("#liveView").innerHTML = html;
 }
 /* ---------- Create tab ---------- */
-let cKind = "promo", cLen = 5;
+let cKind = "promo", cLen = 5, confirmBox = false;
 const C_EXAMPLES = {
   promo: ["A mom and her daughter coloring the bunny page at a cozy kitchen table", "Hands flip through the book slowly on a wooden desk, warm morning light", "Someone opens an Amazon box and smiles when they see the book"],
   original: ["A golden retriever sprinting on a beach at sunset, slow motion", "A businessman in a navy suit walking into a glass skyscraper at dawn", "A woman doing a morning stretch on a balcony over a city"]
@@ -889,9 +918,113 @@ document.addEventListener("focusout", e => {
   }
 });
 
-document.addEventListener("change", e => {
+document.addEventListener("input", e => {
+  if (e.target.id === "hSubj") hDraft = Object.assign(hDraft || {}, {subject: e.target.value});
+});
+document.addEventListener("change", async e => {
+  if (e.target.id === "hOn") { const b = Object.assign({}, hDraft || {}, {on: e.target.checked}); if ($("#hSubj")) b.subject = $("#hSubj").value; if (b.on && !String(b.subject || "").trim()) { e.target.checked = false; return toast("Type a subject first."); } hDraft = null; await api("/api/hunter-set", b); return renderHunter(true); }
+  if (e.target.dataset && e.target.dataset.wtask) { const [dy, i] = e.target.dataset.wtask.split(":"); await api("/api/warmup-check", {day: +dy, i: +i, done: e.target.checked}); return renderWarmup(true); }
   if (e.target.id === "liveSort") { liveSort = e.target.value; renderLive(true); }
 });
+
+
+/* ---------- Clip Hunter ---------- */
+const H_EX = ["GTA 6", "Fortnite", "Call of Duty", "funny dog moments", "money podcast", "gym motivation"];
+let hDraft = null;
+function renderHunter(force) {
+  if (tab !== "hunter" || !S || !S.hunter) return;
+  const v = $("#hunterView");
+  if (!force && v.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
+  const h = S.hunter;
+  const plat = (hDraft && hDraft.platform) || h.platform;
+  const subj = hDraft && hDraft.subject != null ? hDraft.subject : (h.subject || "");
+  const per = (hDraft && hDraft.per_run) || h.per_run || 2;
+  const P = {twitch: ["🟣", "Twitch", "Hot clips from live streams"], youtube: ["▶️", "YouTube", "Fresh popular videos, best moments cut out"], instagram: ["📸", "Instagram", "Not available yet (Instagram blocks free search)"]};
+  const rules = h.is_game === true ? `<div class="rules game">🎮 <b>Game rules ON</b>${h.game_name ? " · " + esc(h.game_name) : ""}: only game play moments, facecam on top + game below, big captions</div>`
+    : h.is_game === false ? `<div class="rules">📺 <b>Regular rules</b>: best moments + big subtitles of what they say</div>` : "";
+  const twSetup = plat === "twitch" && !h.has_twitch ? `<div class="setup" style="flex-direction:column;align-items:stretch"><b>One-time Twitch setup (5 min)</b>
+      <ol class="steps"><li>Open <b>dev.twitch.tv/console</b> and log in with your Twitch account</li><li>Click <b>Register Your Application</b></li>
+      <li>Name: <b>StratusHouse Hunter</b> · OAuth Redirect: <b>http://localhost</b> · Category: <b>Other</b> · Client type: <b>Confidential</b></li>
+      <li>Click <b>Create</b>, then <b>Manage</b>, then <b>New Secret</b></li><li>Paste both below</li></ol>
+      <input type="password" id="hTwId" placeholder="Client ID" autocomplete="off"><input type="password" id="hTwSec" placeholder="Client Secret" autocomplete="off">
+      <button class="btn go sm" id="hTwSave">Connect Twitch</button></div>` : "";
+  const items = h.items || [];
+  v.innerHTML = `<div class="cwrap"><div class="cform">
+      <label class="hidesw" style="padding:14px"><input type="checkbox" id="hOn" ${h.on ? "checked" : ""}><span class="knob"></span>
+        <span><b style="font-size:16px">Clip Hunter is ${h.on ? "ON" : "OFF"}</b><small>${h.on ? "Searches every " + h.every + " hours" + (h.next ? " · next " + esc(h.next) : "") : "Turn on to search every 2 hours by itself"}</small></span></label>
+      <h3>1 · Where to look</h3>
+      <div class="kinds" style="grid-template-columns:repeat(3,1fr)">${Object.entries(P).map(([k, x]) => `<button class="kind ${plat === k ? "on" : ""}" data-hplat="${k}" ${k === "instagram" ? 'style="opacity:.55"' : ""}><span class="ic">${x[0]}</span><b>${x[1]}</b><span>${x[2]}</span></button>`).join("")}</div>
+      ${twSetup}
+      <h3>2 · What subject?</h3>
+      <input type="text" id="hSubj" value="${esc(subj)}" placeholder="e.g. GTA 6, dog training, money podcast">
+      <div class="chips">${H_EX.map(x => `<button class="chip" data-hex="${esc(x)}">${esc(x)}</button>`).join("")}</div>
+      ${rules}
+      <h3>3 · How many per search</h3>
+      <div class="chips">${[1, 2, 3].map(n => `<button class="chip ${per === n ? "on" : ""}" data-hper="${n}">${n} video${n > 1 ? "s" : ""}</button>`).join("")}</div>
+      <span class="muted" style="font-size:12px">Fewer = lighter on your Mac. Each one becomes up to 3 clips at Your Desk.</span>
+      <div class="row"><button class="btn go" id="hSave" style="padding:12px">💾 Save</button><button class="btn" id="hRun" ${h.running ? "disabled" : ""}>${h.running ? "Searching…" : "🔎 Search now"}</button></div>
+      <div class="muted" style="font-size:12px">${h.last_run ? "Last search: " + esc(h.last_run.replace("T", " ").slice(0, 16)) + " · " + esc(h.last_note || "") : "Hasn't searched yet."}${h.pending ? " · " + h.pending + " waiting for the clipper" : ""}</div>
+      <div class="hflow"><span>🔎 Find hot clips</span>→<span>🚫 Skip already-posted</span>→<span>✂️ Clip + captions</span>→<span>🗂 Your Desk</span>→<span>✅ You approve</span></div>
+    </div>
+    <div class="cards"><h3 style="margin:0">What it found</h3>
+      ${items.length ? items.map(i => `<div class="hitem">${i.thumb ? `<img src="${esc(i.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<img alt="">`}
+        <div><b>${esc(i.title || "(no title)")}</b><span class="meta">${esc(i.creator)} · ${i.platform === "twitch" ? "Twitch" : "YouTube"} · ${fmtN(i.views)} views</span><br>
+        <span class="hbadge ${i.state}">${i.state === "sent" ? "✅ " : "⏭ "}${esc(i.why || "")}</span></div></div>`).join("")
+        : `<div class="empty"><b style="color:var(--ink)">Nothing found yet</b><br>Pick a place, type a subject, then press Search now.</div>`}
+      ${(h.lessons || []).length ? `<div class="box"><b>📒 What's working (from your posts)</b><ul class="steps">${h.lessons.map(l => `<li>${esc(l)}</li>`).join("")}</ul></div>`
+        : `<div class="box"><b>📒 What's working</b><span class="muted" style="font-size:12px">After 3 hunted clips are posted, I'll write down what got the most views here, and use it for the next picks and captions.</span></div>`}
+    </div></div>`;
+}
+
+/* ---------- Warm-Up ---------- */
+let wSel = null;
+function renderWarmup(force) {
+  if (tab !== "warmup" || !S) return;
+  const v = $("#warmupView");
+  if (!force && v.contains(document.activeElement) && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+  const w = S.warmup;
+  if (!w) {
+    const hist = S.warmup_history || [];
+    v.innerHTML = `<div class="cwrap"><div class="cform">
+      <h3>Start a 14-day warm-up</h3>
+      <div class="rules">✋ <b>By hand only.</b> No bot, nothing automatic. About 10 minutes a day on your phone. This keeps your account safe.</div>
+      <label class="f">New niche<input type="text" id="wNiche" placeholder="e.g. GTA 6 clips, dog training, anti-aging"></label>
+      <div class="chips">${["instagram", "tiktok", "youtube"].map(p => `<button class="chip ${p !== "youtube" ? "on" : ""}" data-wplat="${p}">${PLAT[p] || p}</button>`).join("")}</div>
+      <button class="btn go" id="wStart" style="padding:12px">🔥 Start warm-up</button>
+      <span class="muted" style="font-size:12px">Your manager writes 14 days of short to-dos for this niche: what to search, who to follow, what to comment.</span>
+    </div><div class="cards"><h3 style="margin:0">Past warm-ups</h3>${hist.length ? hist.map(x => `<div class="box"><b>${esc(x.niche)}</b><span class="muted" style="font-size:12px">${esc(x.started)} → ${esc(x.ended)} · ${x.days_done} of 14 days done</span></div>`).join("") : `<div class="empty">None yet.</div>`}</div></div>`;
+    return;
+  }
+  const day = wSel || w.day;
+  const d = w.days[day - 1] || w.days[0];
+  const mins = d.tasks.reduce((a, t) => a + (t.m || 0), 0);
+  const plats = w.platforms || [];
+  const fol = p => {
+    const auto = (x) => x && x.followers && typeof x.followers[p] === "number" ? x.followers[p] : null;
+    const man = (w.manual || {})[p] || {};
+    const b = auto(w.before) ?? man.first ?? null, n = auto(w.now) ?? man.latest ?? null;
+    return [b, n];
+  };
+  v.innerHTML = `<div class="cwrap"><div class="cform">
+      <div class="row" style="justify-content:space-between;align-items:center"><div><h3>🔥 ${esc(w.niche)}</h3><b style="font-size:20px">Day ${w.day} of 14${w.over ? " · finished" : ""}</b></div>
+        <div style="text-align:center"><div class="streak">🔥 ${w.streak}</div><span class="muted" style="font-size:12px">day streak</span></div></div>
+      <div class="wdays">${w.days.map(x => `<button class="wday ${x.state} ${x.n === day ? "sel" : ""}" data-wday="${x.n}" title="Day ${x.n}">${x.n}</button>`).join("")}</div>
+      <span class="muted" style="font-size:12px">🟩 done · 🟨 today · 🟥 missed · tap a day to see it</span>
+      <h3>${day === w.day ? "Today" : "Day " + day} · about ${mins} min</h3>
+      ${d.tasks.map((t, i) => `<label class="wtask ${t.done ? "done" : ""}"><input type="checkbox" data-wtask="${day}:${i}" ${t.done ? "checked" : ""}><span>${esc(t.t)}</span><small>${t.m} min</small></label>`).join("")}
+      ${d.done === d.tasks.length ? `<div class="rules game">✅ Day ${day} done. Nice work.</div>` : ""}
+      <button class="btn bad sm" id="wStop" style="align-self:flex-start">Finish warm-up</button>
+    </div><div class="cards">
+      <div class="box"><b>#️⃣ Hashtags to search</b><span class="muted" style="font-size:12px">Tap one to copy it</span><div class="chips">${(w.hashtags || []).map(x => `<button class="chip" data-wcopy="${esc(x)}">${esc(x)}</button>`).join("")}</div></div>
+      <div class="box"><b>👥 Accounts to follow</b><ul class="steps">${(w.accounts || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>
+      <div class="box"><b>💬 Comment ideas</b><span class="muted" style="font-size:12px">Tap to copy, then change a few words so it sounds like you</span><div class="cards" style="gap:6px">${(w.comments || []).map(x => `<button class="btn sm" style="text-align:left" data-wcopy="${esc(x)}">${esc(x)}</button>`).join("")}</div></div>
+      <div class="box"><b>📈 Before → now</b>
+        <table><tr><th>App</th><th>Followers at start</th><th>Followers now</th><th>Change</th></tr>${plats.map(p => { const [b, n] = fol(p); return `<tr><td>${PLAT[p] || p}</td><td>${b == null ? "–" : fmtN(b)}</td><td>${n == null ? "–" : fmtN(n)}</td><td>${b != null && n != null ? (n - b >= 0 ? "+" : "") + fmtN(n - b) : "–"}</td></tr>`; }).join("")}
+        <tr><td>Views (all posts)</td><td>${w.before && w.before.views != null ? fmtN(w.before.views) : "–"}</td><td>${w.now && w.now.views != null ? fmtN(w.now.views) : "–"}</td><td>${w.before && w.now && w.before.views != null && w.now.views != null ? "+" + fmtN(w.now.views - w.before.views) : "–"}</td></tr></table>
+        <span class="muted" style="font-size:12px">Not tracked automatically? Type today's follower count:</span>
+        <div class="row">${plats.map(p => `<input type="number" min="0" style="width:120px" placeholder="${PLAT[p] || p}" data-wlog="${p}">`).join("")}<button class="btn sm" id="wLogSave">Save</button></div></div>
+    </div></div>`;
+}
 
 /* ---------- clicks ---------- */
 document.addEventListener("click", async e => {
@@ -917,6 +1050,23 @@ document.addEventListener("click", async e => {
     return;
   }
   if (t.id === "liveRefresh") return api("/api/live-refresh");
+  if (d.hplat) { hDraft = Object.assign(hDraft || {}, {platform: d.hplat, subject: $("#hSubj").value}); if (d.hplat === "instagram") toast("Instagram doesn't allow free searching yet. Use Twitch or YouTube."); return renderHunter(true); }
+  if (d.hex) { $("#hSubj").value = d.hex; hDraft = Object.assign(hDraft || {}, {subject: d.hex}); return; }
+  if (d.hper) { hDraft = Object.assign(hDraft || {}, {per_run: +d.hper, subject: $("#hSubj").value}); return renderHunter(true); }
+  if (t.id === "hSave") { const b = Object.assign({}, hDraft || {}, {subject: $("#hSubj").value}); if (!b.subject.trim()) return toast("Type a subject first."); hDraft = null; await api("/api/hunter-set", b); return renderHunter(true); }
+  if (t.id === "hRun") { const b = Object.assign({}, hDraft || {}, {subject: $("#hSubj").value}); hDraft = null; await api("/api/hunter-set", b); t.disabled = true; await api("/api/hunter-run"); return renderHunter(true); }
+  if (t.id === "hTwSave") { await api("/api/hunter-set", {twitch_client_id: $("#hTwId").value, twitch_client_secret: $("#hTwSec").value}); return renderHunter(true); }
+  if (d.wplat) { t.classList.toggle("on"); return; }
+  if (t.id === "wStart") {
+    const niche = $("#wNiche").value.trim(); if (niche.length < 3) return toast("Type the niche first.");
+    t.disabled = true; t.textContent = "Writing your 14 days…";
+    await api("/api/warmup-start", {niche, platforms: [...document.querySelectorAll("[data-wplat].on")].map(c => c.dataset.wplat)});
+    return renderWarmup(true);
+  }
+  if (d.wday) { wSel = +d.wday === S.warmup.day ? null : +d.wday; return renderWarmup(true); }
+  if (d.wcopy) { await copyText(d.wcopy); return toast("Copied"); }
+  if (t.id === "wLogSave") { for (const i of document.querySelectorAll("[data-wlog]")) if (i.value.trim()) await api("/api/warmup-log", {platform: i.dataset.wlog, followers: i.value}); return renderWarmup(true); }
+  if (t.id === "wStop") { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to finish"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-stop"); wSel = null; return renderWarmup(true); }
   if (d.ckind && !demo) { const ask = $("#cAsk").value; cKind = d.ckind; $("#cForm").innerHTML = createForm(); $("#cAsk").value = ask; return; }
   if (d.clen) { cLen = +d.clen; const ask = $("#cAsk").value; $("#cForm").innerHTML = createForm(); $("#cAsk").value = ask; return; }
   if (d.cex) { $("#cAsk").value = d.cex; $("#cAsk").focus(); return; }
