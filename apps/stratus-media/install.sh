@@ -25,6 +25,7 @@ if [ "$SRC" != "$DEST" ]; then
   cp "$SRC/static/index.html" "$DEST/static/index.html"
   cp "$SRC"/static/employees/* "$DEST/static/employees/" 2>/dev/null || true
   cp "$SRC"/tools/* "$DEST/tools/" 2>/dev/null || true
+  cp "$SRC"/bin/*.sh "$DEST/bin/" 2>/dev/null && chmod +x "$DEST"/bin/*.sh || true
   cp "$SRC/install.sh" "$DEST/install.sh"
 fi
 chmod +x "$DEST/install.sh"

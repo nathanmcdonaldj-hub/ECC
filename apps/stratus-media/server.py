@@ -695,7 +695,7 @@ def mix_music(rec):
             clip_len, voice_len = media_duration(ff, rec["file"]), media_duration(ff, vfile)
             if clip_len and voice_len:
                 delay = max(0, int((clip_len - voice_len - 0.4) * 1000))
-        parts.append("[{0}:a]aresample=48000,adelay={1}|{1},volume=1.8,apad,asplit=2[vo][vkey]".format(vi, delay))
+        parts.append("[{0}:a]aresample=48000,adelay={1}|{1},volume=1.4,apad,asplit=2[vo][vkey]".format(vi, delay))
         parts.append("[0:a][vkey]sidechaincompress=threshold=0.02:ratio=10:attack=20:release=350[orig]")
         orig = "[orig]"
         mix.append("[vo]")
