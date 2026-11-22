@@ -534,7 +534,8 @@ const SHEETS = {
             <span class="chips" data-vwhen>${["start", "end"].map(w => `<span class="chip ${(c.voice_when || "start") === w ? "on" : ""}" data-when="${w}">${w === "start" ? "▶ At the start" : "⏹ At the end"}</span>`).join("")}</span></div>
           ${(S.voices || []).length ? `<label class="f">Voice<select data-f="voice">${voiceSelect(c.voice)}</select></label>` : ""}
           <div class="row">
-            <button class="btn go" data-approve="${esc(c.id)}">Approve</button>
+            <button class="btn go" data-approvenow="${esc(c.id)}">🚀 Approve &amp; post now</button>
+            <button class="btn" data-approve="${esc(c.id)}">🕒 Approve for the time above</button>
             <button class="btn sm" data-preview="${esc(c.id)}">Preview sound</button>
             <button class="btn sm" data-redo="${esc(c.id)}">Redo…</button>
             <button class="btn bad sm" data-skip="${esc(c.id)}">Skip</button></div>
@@ -1119,6 +1120,13 @@ document.addEventListener("click", async e => {
   });
   if (d.when) { t.parentElement.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c === t)); return; }
   if (d.readcap) { const cap = $("[data-f=caption]", card).value.split("\n").filter(l => l.trim() && !l.trim().startsWith("#")).join(" ").replace(/#\w+/g, "").trim(); if (!cap) return toast("Write a caption first."); $("[data-f=voice_text]", card).value = cap.slice(0, 400); return toast("Caption copied into the voice box."); }
+  if (d.approvenow) {
+    const v = read(); if (!v.platforms.length) return toast("Pick at least one platform.");
+    const n = new Date(), p2 = x => String(x).padStart(2, "0");
+    v.time = `${n.getFullYear()}-${p2(n.getMonth() + 1)}-${p2(n.getDate())}T${p2(n.getHours())}:${p2(n.getMinutes())}`;
+    t.disabled = true; t.textContent = "Posting…";
+    await api("/api/approve", v); return toast("Posting now. It goes out within a minute.");
+  }
   if (d.approve) { const v = read(); if (!v.platforms.length) return toast("Pick at least one platform."); return api("/api/approve", v); }
   if (d.preview) { const v = read(); if (v.music === "none" && !v.voice_text.trim()) v.music = "auto"; toast("Mixing…"); const j = await api("/api/music-preview", {id: v.id, music: v.music, voice_text: v.voice_text, voice: v.voice}); if (j.ok) toast("Press play to hear it" + (j.track ? " with " + j.track : "") + (v.voice_text.trim() ? " and the voice line" : "")); return; }
   if (d.skip) return api("/api/skip", {id: d.skip});
