@@ -1547,7 +1547,7 @@ def apply_schedule(clip_id, time_s, platforms, caption, hashtags, music, voice_t
     if "tiktok" in rec["platforms"]:
         rec["tiktok_done"] = False
     persist()
-    return True, "Scheduled for " + nice_time(time_s)
+    return True, "✅ Approved. Moved to Courier: it posts " + nice_time(time_s) + "."
 
 
 # ---------------------------------------------------------------- state for UI

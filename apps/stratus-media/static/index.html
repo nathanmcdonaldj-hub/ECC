@@ -520,7 +520,11 @@ const SHEETS = {
     <div><button class="btn go" id="capGo">Write captions now</button></div></div>`,
   desk: () => {
     const list = S.clips_waiting;
-    if (!list.length) return `<p class="muted">Nothing waiting on you. New clips show up here each morning.</p>`;
+    const sched = S.clips_scheduled || [];
+    const approved = sched.length ? `<h3>✅ Approved · waiting in Courier (${sched.length})</h3>
+      <table><tr><th>Clip</th><th>Posts</th><th></th></tr>${sched.map(c => `<tr><td>${esc((c.caption || "Clip " + c.num).split("\n")[0].slice(0, 50))}</td><td><b>${esc(c.time_nice)}</b><br><span class="muted" style="font-size:11px">${(c.platforms || []).map(p => PLAT[p] || p).join(", ")}</span></td>
+        <td class="row"><button class="btn sm go" data-postnow="${esc(c.id)}">🚀 Post now</button><button class="btn sm" data-unsched="${esc(c.id)}">Back to desk</button></td></tr>`).join("")}</table>` : "";
+    if (!list.length) return `<p class="muted">Nothing waiting on you. New clips show up here each morning.</p>` + approved;
     return (list.some(c => c.status === "new") ? `<div class="box"><span>Some clips have no captions yet.</span><div><button class="btn go" id="capGo">Write captions now</button></div></div>` : "") +
       list.map(c => `<div class="clipcard" data-clip="${esc(c.id)}">
         <video src="${c.music_url || c.video_url}" ${c.thumb_url ? `poster="${c.thumb_url}"` : ""} controls preload="none" playsinline></video>
@@ -542,7 +546,7 @@ const SHEETS = {
             <button class="btn sm" data-preview="${esc(c.id)}">Preview sound</button>
             <button class="btn sm" data-redo="${esc(c.id)}">Redo…</button>
             <button class="btn bad sm" data-skip="${esc(c.id)}">Skip</button></div>
-        </div></div>`).join("");
+        </div></div>`).join("") + approved;
   },
   courier: () => `
     <div class="box"><b>${S.posts_used} of ${S.posts_limit} free posts used this month</b><div class="prog"><i style="width:${Math.min(100, S.posts_used / S.posts_limit * 100)}%"></i></div>
