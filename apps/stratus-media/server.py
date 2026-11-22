@@ -793,7 +793,24 @@ def youtube_title(rec):
     return (first or "Stratus House")[:95]
 
 
+_POSTING = set()
+
+
 def post_clip(rec):
+    """Post one clip, once. "Post now" and the scheduler can both reach a clip in the same minute,
+    so a clip being uploaded (or already posted) is never sent a second time."""
+    with LOCK:
+        if rec["id"] in _POSTING or rec.get("status") in ("posted", "partial"):
+            return True
+        _POSTING.add(rec["id"])
+    try:
+        return _post_clip(rec)
+    finally:
+        with LOCK:
+            _POSTING.discard(rec["id"])
+
+
+def _post_clip(rec):
     """Post one approved clip to its auto platforms. Returns True on success."""
     key = secrets().get("upload_post_key")
     name = "clip {} from {}".format(rec.get("num"), rec.get("source"))
@@ -1679,6 +1696,8 @@ def background_loop():
                     if when <= now().strftime("%Y-%m-%dT%H:%M"):
                         due.append(rec)
             for rec in due:
+                if rec["id"] in _POSTING or rec.get("status") != "scheduled":
+                    continue
                 rec.pop("retry_at", None)
                 if any(p in ("instagram", "youtube") for p in rec.get("platforms", [])):
                     post_clip(rec)
@@ -2151,6 +2170,8 @@ def r_post_now(d):
         rec = STATE["clips"].get(d.get("id"))
         if not rec:
             return {"ok": False, "message": "Clip not found."}
+        if rec.get("status") in ("posted", "partial") or rec["id"] in _POSTING:
+            return {"ok": True, "message": "Already posted (or posting right now)."}
         rec["status"] = "scheduled"
         rec["time"] = now().strftime("%Y-%m-%dT%H:%M")
         rec.pop("retry_at", None)
