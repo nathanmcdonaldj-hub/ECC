@@ -3025,7 +3025,10 @@ HUNT_PROFILE_SYSTEM = (
     "\"twitch_category\": the exact Twitch category name for that game (e.g. 'Grand Theft Auto VI'), or null, "
     "\"twitch_search\": 1-3 words to find Twitch channels about the subject when it is not a game (e.g. 'dog training'), "
     "\"youtube_query\": the best YouTube search words for fresh, popular videos on the subject, "
-    "\"label\": a short clean name for the subject}.")
+    "\"label\": a short clean name for the subject}. "
+    "If the subject is news, drama, controversy or reactions ABOUT a game (not playing it), set is_game false, "
+    "so talking and reaction clips are kept. Search words must never ask for sexual, nude or explicit footage: "
+    "for gossip topics use words like reaction, news, explained, commentary.")
 
 HUNT_LESSONS_SYSTEM = (
     "You review how Mr. McDonald's reposted short clips performed. Reply with JSON only: "
