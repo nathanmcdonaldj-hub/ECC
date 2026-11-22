@@ -3143,13 +3143,15 @@ def twitch_candidates(prof):
 
 
 def youtube_candidates(prof):
-    data = ytdlp_json(["--playlist-end", "40", "ytsearch40:" + prof["youtube_query"]])
+    # YouTube's own filter: uploaded this week, sorted by view count (sp=CAMSAggD).
+    url = "https://www.youtube.com/results?search_query={}&sp=CAMSAggD".format(urllib.parse.quote_plus(prof["youtube_query"]))
+    data = ytdlp_json(["--playlist-end", "40", url])
     entries = [e for e in (data.get("entries") or []) if e]
-    # Prefer fresh uploads (last 3 days); if YouTube gives none, use what it ranked highest.
-    cutoff = time.time() - 3 * 86400
-    fresh = [e for e in entries if (e.get("timestamp") or e.get("release_timestamp") or 0) >= cutoff]
+    if not entries:   # fall back to plain search ranking
+        data = ytdlp_json(["--playlist-end", "40", "ytsearch40:" + prof["youtube_query"]])
+        entries = [e for e in (data.get("entries") or []) if e]
     out = []
-    for e in fresh or entries:
+    for e in entries:
         dur = e.get("duration") or 0
         if not e.get("id") or (dur and (dur < 120 or dur > 90 * 60)):
             continue   # skip Shorts and very long streams (too heavy for this Mac)
