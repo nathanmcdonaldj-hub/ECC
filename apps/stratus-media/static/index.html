@@ -464,6 +464,12 @@ function renderSheet(id, soft) {
 
 const platformChips = (sel, key) => ["instagram","youtube","tiktok"].map(p =>
   `<button class="chip ${sel.includes(p) ? "on" : ""}" data-plat="${p}" data-key="${esc(key)}">${{instagram:"Instagram",youtube:"YouTube",tiktok:"TikTok (you post)"}[p]}</button>`).join("");
+function voiceSelect(cur) {
+  const vs = (S.voices || []).map(v => typeof v === "string" ? {id: v, label: v, group: "Mac voices"} : v);
+  const sel = vs.some(v => v.id === cur) ? cur : (vs[0] || {}).id;
+  const groups = [...new Set(vs.map(v => v.group))];
+  return groups.map(g => `<optgroup label="${esc(g)}">${vs.filter(v => v.group === g).map(v => `<option value="${esc(v.id)}" ${v.id === sel ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</optgroup>`).join("");
+}
 const musicSelect = (cur, key) => `<select data-music="${esc(key)}"><option value="none" ${cur === "none" ? "selected" : ""}>No music</option><option value="auto" ${cur === "auto" ? "selected" : ""}>Auto (light track)</option>${S.music.map(m => `<option ${cur === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>`;
 
 const SHEETS = {
@@ -500,7 +506,7 @@ const SHEETS = {
           <label class="f">🗣️ Voice saying a line (optional, free Mac voice)<textarea data-f="voice_text" rows="2" placeholder="e.g. Wait for what he does next…">${esc(c.voice_text || "")}</textarea></label>
           <div class="row"><button class="btn sm" data-readcap="1">Use my caption</button>
             <span class="chips" data-vwhen>${["start", "end"].map(w => `<span class="chip ${(c.voice_when || "start") === w ? "on" : ""}" data-when="${w}">${w === "start" ? "▶ At the start" : "⏹ At the end"}</span>`).join("")}</span></div>
-          ${(S.voices || []).length ? `<label class="f">Voice<select data-f="voice">${S.voices.map(v => `<option ${(c.voice || S.voices[0]) === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>` : ""}
+          ${(S.voices || []).length ? `<label class="f">Voice<select data-f="voice">${voiceSelect(c.voice)}</select></label>` : ""}
           <div class="row">
             <button class="btn go" data-approve="${esc(c.id)}">Approve</button>
             <button class="btn sm" data-preview="${esc(c.id)}">Preview sound</button>

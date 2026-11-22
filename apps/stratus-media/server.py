@@ -537,7 +537,97 @@ def list_voices():
     return names
 
 
+# Natural voices: VoiceStudio's local engine (Kokoro, Apache-2.0) on 127.0.0.1:3900.
+# Started only when a voice line is made, and stopped again after a few idle minutes to keep the Mac light.
+VS_URL = "http://127.0.0.1:3900"
+VS_SCRIPT = os.path.join(APP_DIR, "bin", "voicestudio-backend.sh")
+VS_IDLE_STOP = 300
+NATURAL_VOICES = [
+    ("af_heart", "Heart · US woman, warm"), ("am_michael", "Michael · US man"),
+    ("af_bella", "Bella · US woman"), ("am_adam", "Adam · US man"),
+    ("af_nicole", "Nicole · US woman, soft"), ("am_onyx", "Onyx · US man, deep"),
+    ("bf_emma", "Emma · UK woman"), ("bm_george", "George · UK man"),
+]
+_VS_LOCK = threading.Lock()
+_VS_TIMER = [None]
+_VS_STARTED_BY_US = [False]
+
+
+def natural_ready():
+    return os.path.exists(VS_SCRIPT) and os.path.isdir("/Applications/VoiceStudio.app")
+
+
+def voice_options():
+    """Natural voices first (when VoiceStudio is installed), then the Mac's built-in voices as backup."""
+    opts = [{"id": "ks:" + v, "label": label, "group": "Natural voices"} for v, label in NATURAL_VOICES] if natural_ready() else []
+    opts += [{"id": n, "label": n, "group": "Mac voices (backup)"} for n in list_voices()]
+    return opts
+
+
+def _vs_up():
+    try:
+        with urllib.request.urlopen(VS_URL + "/health", timeout=2) as r:
+            return r.status == 200
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+def _vs_stop_idle():
+    with _VS_LOCK:
+        _VS_TIMER[0] = None
+        if _VS_STARTED_BY_US[0]:
+            subprocess.run(["/bin/bash", VS_SCRIPT, "stop"], capture_output=True, timeout=30)
+            _VS_STARTED_BY_US[0] = False
+
+
+def _vs_touch():
+    if _VS_TIMER[0]:
+        _VS_TIMER[0].cancel()
+    t = threading.Timer(VS_IDLE_STOP, _vs_stop_idle)
+    t.daemon = True
+    t.start()
+    _VS_TIMER[0] = t
+
+
+def natural_voice(text, voice, out_path):
+    with _VS_LOCK:
+        if not _vs_up():
+            subprocess.run(["/bin/bash", VS_SCRIPT, "start"], capture_output=True, timeout=60)
+            _VS_STARTED_BY_US[0] = True
+            for _ in range(60):
+                if _vs_up():
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError("vs-down")
+        _vs_touch()
+    body = json.dumps({"model": "mlx-audio", "voice": voice, "input": text[:1000],
+                       "response_format": "wav", "speed": 1.0}).encode()
+    req = urllib.request.Request(VS_URL + "/v1/audio/speech", data=body,
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=180) as r:
+        data = r.read()
+    if len(data) < 1000:
+        raise RuntimeError("vs-empty")
+    with open(out_path, "wb") as fh:
+        fh.write(data)
+    with _VS_LOCK:
+        _vs_touch()
+    return out_path
+
+
 def make_voice(text, voice, out_path):
+    """Natural voice (VoiceStudio) when picked; the Mac's own voice otherwise, and as the fallback."""
+    if voice and voice.startswith("ks:") and natural_ready():
+        try:
+            return natural_voice(text, voice[3:], os.path.splitext(out_path)[0] + ".wav")
+        except Exception as exc:  # noqa: BLE001 - fall back to the Mac voice, never fail the clip
+            print("[Voice] natural voice failed, using Mac voice: {}".format(exc), file=sys.stderr)
+            voice = None
+    return say_voice(text, voice, out_path)
+
+
+def say_voice(text, voice, out_path):
     """Speak the line with the Mac's own voice (the `say` tool) into an audio file."""
     say = shutil.which("say") or ("/usr/bin/say" if os.path.exists("/usr/bin/say") else None)
     if not say:
@@ -1528,7 +1618,7 @@ def build_state(for_model=False):
         "creations": [create_public(c) for c in STATE.get("creations", [])[-20:]][::-1],
         "music": list_music(),
         "music_ready": bool(find_ffmpeg()),
-        "voices": list_voices(),
+        "voices": voice_options(),
         "chat_model": STATE["chat"].get("model") or CONFIG["default_model"],
         "models": CONFIG["models"],
         "chat_log": STATE["chat"].get("log", [])[-30:],
