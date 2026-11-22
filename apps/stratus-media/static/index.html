@@ -926,7 +926,6 @@ document.addEventListener("input", e => {
   if (e.target.id === "hSubj") hDraft = Object.assign(hDraft || {}, {subject: e.target.value});
 });
 document.addEventListener("change", async e => {
-  if (e.target.id === "hTwOnly") { await api("/api/hunter-set", {twitch_only: e.target.checked}); return renderHunter(true); }
   if (e.target.id === "hOn") { const b = Object.assign({}, hDraft || {}, {on: e.target.checked}); if ($("#hSubj")) b.subject = $("#hSubj").value; if (b.on && !String(b.subject || "").trim()) { e.target.checked = false; return toast("Type a subject first."); } hDraft = null; await api("/api/hunter-set", b); return renderHunter(true); }
   if (e.target.dataset && e.target.dataset.wtask) { const [dy, i] = e.target.dataset.wtask.split(":"); await api("/api/warmup-check", {day: +dy, i: +i, done: e.target.checked}); return renderWarmup(true); }
   if (e.target.id === "liveSort") { liveSort = e.target.value; renderLive(true); }
@@ -960,8 +959,6 @@ function renderHunter(force) {
       <h3>1 · Where to look</h3>
       <div class="kinds" style="grid-template-columns:repeat(3,1fr)">${Object.entries(P).map(([k, x]) => `<button class="kind ${plat === k ? "on" : ""}" data-hplat="${k}" ${k === "instagram" ? 'style="opacity:.55"' : ""}><span class="ic">${x[0]}</span><b>${x[1]}</b><span>${x[2]}</span></button>`).join("")}</div>
       ${twSetup}
-      ${plat === "twitch" ? `<label class="hidesw"><input type="checkbox" id="hTwOnly" ${h.twitch_only !== false ? "checked" : ""}><span class="knob"></span>
-        <span><b>Twitch only</b><small>${h.twitch_only !== false ? "If Twitch has nothing, it just tells you. No YouTube backup." : "If Twitch has nothing, it looks on YouTube instead."}</small></span></label>` : ""}
       <h3>2 · What subject?</h3>
       <input type="text" id="hSubj" value="${esc(subj)}" placeholder="e.g. GTA 6, dog training, money podcast">
       <div class="chips">${H_EX.map(x => `<button class="chip" data-hex="${esc(x)}">${esc(x)}</button>`).join("")}</div>
