@@ -107,6 +107,9 @@ details.pr summary{cursor:pointer;font-size:12px;color:var(--mute);font-weight:8
 .hitem img{width:112px;height:63px;object-fit:cover;border-radius:10px;background:var(--navy)}
 .hitem b{font-size:13px;display:block}
 .hitem .meta{font-size:12px;color:var(--mute);font-weight:600}
+.hx{position:absolute;top:6px;right:6px;width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:var(--navy);color:var(--mute);font-weight:900;cursor:pointer}
+.hx:hover{color:#ff8a8a;border-color:#ff8a8a}
+.hitem>div{padding-right:30px}
 .hbadge{display:inline-block;font-size:11px;font-weight:900;padding:3px 9px;border-radius:999px;background:var(--navy);margin-top:4px}
 .hbadge.sent{color:#6be39a}.hbadge.skipped{color:var(--mute)}
 .rules{border-radius:14px;padding:10px 12px;font-size:13px;font-weight:700;background:var(--navy);border:1px solid var(--line)}
@@ -968,7 +971,7 @@ function renderHunter(force) {
       <div class="hflow"><span>🔎 Find hot clips</span>→<span>🚫 Skip already-posted</span>→<span>✂️ Clip + captions</span>→<span>🗂 Your Desk</span>→<span>✅ You approve</span></div>
     </div>
     <div class="cards"><h3 style="margin:0">What it found</h3>
-      ${items.length ? items.map(i => `<div class="hitem">${i.thumb ? `<img src="${esc(i.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<img alt="">`}
+      ${items.length ? items.map(i => `<div class="hitem" style="position:relative"><button class="hx" data-hdel="${esc(i.key)}" aria-label="Remove" title="Remove">✕</button>${i.thumb ? `<img src="${esc(i.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<img alt="">`}
         <div><b>${esc(i.title || "(no title)")}</b><span class="meta">${esc(i.creator)} · ${i.platform === "twitch" ? "Twitch" : "YouTube"} · ${fmtN(i.views)} views</span><br>
         <span class="hbadge ${i.state}">${i.state === "sent" ? "✅ " : "⏭ "}${esc(i.why || "")}</span></div></div>`).join("")
         : `<div class="empty"><b style="color:var(--ink)">Nothing found yet</b><br>Pick a place, type a subject, then press Search now.</div>`}
@@ -1056,6 +1059,7 @@ document.addEventListener("click", async e => {
   if (d.hper) { hDraft = Object.assign(hDraft || {}, {per_run: +d.hper, subject: $("#hSubj").value}); return renderHunter(true); }
   if (t.id === "hSave") { const b = Object.assign({}, hDraft || {}, {subject: $("#hSubj").value}); if (!b.subject.trim()) return toast("Type a subject first."); hDraft = null; await api("/api/hunter-set", b); return renderHunter(true); }
   if (t.id === "hRun") { const b = Object.assign({}, hDraft || {}, {subject: $("#hSubj").value}); hDraft = null; await api("/api/hunter-set", b); t.disabled = true; await api("/api/hunter-run"); return renderHunter(true); }
+  if (d.hdel) { t.disabled = true; await api("/api/hunter-remove", {key: d.hdel}); return renderHunter(true); }
   if (t.id === "hTwSave") { await api("/api/hunter-set", {twitch_client_id: $("#hTwId").value, twitch_client_secret: $("#hTwSec").value}); return renderHunter(true); }
   if (d.wplat) { t.classList.toggle("on"); return; }
   if (t.id === "wStart") {

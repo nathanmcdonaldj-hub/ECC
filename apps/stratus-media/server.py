@@ -3370,6 +3370,35 @@ def r_hunter_set(d):
     return {"ok": True, "message": ("Clip Hunter is ON. First search starts now." if d.get("on") else "Saved.") if "on" not in d or d["on"] else "Clip Hunter is OFF."}
 
 
+def r_hunter_remove(d):
+    """✕ on a found card: drop it from the list and, if it hasn't been clipped yet, take it out of the inbox.
+    It stays in the seen list so the hunter won't bring it back. Clips already at Your Desk are untouched."""
+    key = d.get("key")
+    h = hunter()
+    with LOCK:
+        item = next((i for i in h["items"] if i.get("key") == key), None)
+        if not item:
+            return {"ok": False, "message": "Already gone."}
+        h["items"] = [i for i in h["items"] if i.get("key") != key]
+        h["seen"][key] = now_iso()
+        persist()
+    url = item.get("url")
+    cancelled = False
+    if url and any(x["kind"] == "link" and x["name"] == url for x in list_inbox()):
+        path = os.path.join(CONFIG["clip_inbox"], "links.txt")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.readlines()
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.writelines(l for l in lines if l.strip() != url)
+            set_hide("link", url, False)
+            set_hide("link", url, False, GAMEPLAY_FILE)
+            cancelled = True
+        except OSError:
+            pass
+    return {"ok": True, "message": "Removed. It won't be clipped." if cancelled else "Removed from the list."}
+
+
 def r_hunter_run(d):
     if _HUNT["running"]:
         return {"ok": True, "message": "Already searching."}
@@ -3409,6 +3438,7 @@ ROUTES = {
     "/api/warmup-stop": r_warmup_stop,
     "/api/hunter-set": r_hunter_set,
     "/api/hunter-run": r_hunter_run,
+    "/api/hunter-remove": r_hunter_remove,
 }
 
 
