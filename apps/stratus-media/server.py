@@ -3240,6 +3240,13 @@ def run_hunter(manual=False):
                         "no-twitch": "Twitch needs its one-time setup (the yellow box)."}.get(
                     code, "Twitch said no to the keys. Check them in the yellow box." if code.startswith("twitch-auth")
                     else "Couldn't search right now ({}). I'll try again next time.".format(code[:60]))
+            fell_back = False
+            if plat == "twitch" and not cands and not note and find_ytdlp():
+                try:   # Twitch had nothing for this subject: look on YouTube instead
+                    cands = youtube_candidates(prof)
+                    fell_back = bool(cands)
+                except RuntimeError:
+                    pass
             fresh = [c for c in cands if c["key"] not in h["seen"]]
             found = []
             for c in fresh[:12]:
@@ -3247,7 +3254,7 @@ def run_hunter(manual=False):
                     break
                 c["found_at"] = now_iso()
                 h["seen"][c["key"]] = now_iso()
-                if plat == "twitch" and already_reposted(c):
+                if c["platform"] == "twitch" and already_reposted(c):
                     c.update(state="skipped", why="Another page already posted this one")
                     found.append(c)
                     continue
@@ -3255,9 +3262,12 @@ def run_hunter(manual=False):
                 c.update(state="sent" if ok else "skipped", why="Sent to the clipper" if ok else "Couldn't add it")
                 sent += 1 if ok else 0
                 found.append(c)
+            if not cands and not note:
+                note = ("Nothing found on {} for “{}” in the last day. Try YouTube, or a broader subject."
+                        .format("Twitch" if plat == "twitch" else "YouTube", subject))
             if cands and not note:
-                note = "Found {} new, sent {} to the clipper.".format(len(fresh), sent) if fresh else \
-                    "Nothing new since last time."
+                note = ("Nothing on Twitch, so I looked on YouTube. " if fell_back else "") + (
+                    "Found {} new, sent {} to the clipper.".format(len(fresh), sent) if fresh else "Nothing new since last time.")
             with LOCK:
                 h["items"] = (found + h["items"])[:HUNT_MAX_ITEMS]
                 # keep the seen list from growing forever
