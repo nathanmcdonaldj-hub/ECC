@@ -3046,6 +3046,7 @@ def hunter():
     h.setdefault("items", [])
     h.setdefault("seen", {})
     h.setdefault("lessons", [])
+    h.setdefault("twitch_only", True)
     return h
 
 
@@ -3241,7 +3242,7 @@ def run_hunter(manual=False):
                     code, "Twitch said no to the keys. Check them in the yellow box." if code.startswith("twitch-auth")
                     else "Couldn't search right now ({}). I'll try again next time.".format(code[:60]))
             fell_back = False
-            if plat == "twitch" and not cands and not note and find_ytdlp():
+            if plat == "twitch" and not cands and not note and not h.get("twitch_only") and find_ytdlp():
                 try:   # Twitch had nothing for this subject: look on YouTube instead
                     cands = youtube_candidates(prof)
                     fell_back = bool(cands)
@@ -3263,8 +3264,8 @@ def run_hunter(manual=False):
                 sent += 1 if ok else 0
                 found.append(c)
             if not cands and not note:
-                note = ("Nothing found on {} for “{}” in the last day. Try YouTube, or a broader subject."
-                        .format("Twitch" if plat == "twitch" else "YouTube", subject))
+                note = ("Twitch found nothing for “{}” in the last day. (Twitch only is on, so I didn't look on YouTube.)".format(subject)
+                        if plat == "twitch" else "YouTube found nothing for “{}” this week. Try a broader subject.".format(subject))
             if cands and not note:
                 note = ("Nothing on Twitch, so I looked on YouTube. " if fell_back else "") + (
                     "Found {} new, sent {} to the clipper.".format(len(fresh), sent) if fresh else "Nothing new since last time.")
@@ -3331,7 +3332,7 @@ def hunter_public():
             nxt = nice_dt(datetime.strptime(h["last_run"], "%Y-%m-%dT%H:%M:%S") + timedelta(hours=h.get("every", 2)))
         except ValueError:
             nxt = None
-    return {k: h.get(k) for k in ("on", "platform", "subject", "every", "per_run", "last_run", "last_note", "lessons")} | {
+    return {k: h.get(k) for k in ("on", "platform", "subject", "every", "per_run", "last_run", "last_note", "lessons", "twitch_only")} | {
         "running": _HUNT["running"], "next": nxt, "items": h["items"][:30],
         "is_game": bool(prof.get("is_game")) if prof.get("subject") == h.get("subject") else None,
         "game_name": prof.get("game_name") if prof.get("subject") == h.get("subject") else None,
@@ -3347,6 +3348,8 @@ def r_hunter_set(d):
             h["platform"] = d["platform"]
         if "subject" in d:
             h["subject"] = (d.get("subject") or "").strip()[:80]
+        if "twitch_only" in d:
+            h["twitch_only"] = bool(d["twitch_only"])
         if d.get("per_run") in (1, 2, 3):
             h["per_run"] = d["per_run"]
         if "on" in d:
