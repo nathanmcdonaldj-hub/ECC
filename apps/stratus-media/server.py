@@ -3040,7 +3040,7 @@ def ytdlp_json(args, timeout=120):
     res = subprocess.run([yd, "--flat-playlist", "-J", "--no-warnings", "--ignore-errors"] + args,
                          capture_output=True, text=True, timeout=timeout)
     try:
-        return json.loads(res.stdout or "{}")
+        return json.loads(res.stdout or "{}") or {}
     except ValueError:
         raise RuntimeError("ytdlp:" + (res.stderr or "")[-200:])
 
@@ -3143,9 +3143,13 @@ def twitch_candidates(prof):
 
 
 def youtube_candidates(prof):
-    data = ytdlp_json(["--playlist-end", "30", "ytsearchdate30:" + prof["youtube_query"]])
+    data = ytdlp_json(["--playlist-end", "40", "ytsearch40:" + prof["youtube_query"]])
+    entries = [e for e in (data.get("entries") or []) if e]
+    # Prefer fresh uploads (last 3 days); if YouTube gives none, use what it ranked highest.
+    cutoff = time.time() - 3 * 86400
+    fresh = [e for e in entries if (e.get("timestamp") or e.get("release_timestamp") or 0) >= cutoff]
     out = []
-    for e in data.get("entries") or []:
+    for e in fresh or entries:
         dur = e.get("duration") or 0
         if not e.get("id") or (dur and (dur < 120 or dur > 90 * 60)):
             continue   # skip Shorts and very long streams (too heavy for this Mac)
