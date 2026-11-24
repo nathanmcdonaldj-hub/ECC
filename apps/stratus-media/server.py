@@ -811,11 +811,14 @@ def post_clip(rec):
             _POSTING.discard(rec["id"])
 
 
-def _post_clip(rec):
-    """Post one approved clip to its auto platforms. Returns True on success."""
+def _post_clip(rec, only=None):
+    """Post one approved clip to its auto platforms (or just `only`). Returns True on success."""
     key = secrets().get("upload_post_key")
     name = "clip {} from {}".format(rec.get("num"), rec.get("source"))
-    platforms = [p for p in rec.get("platforms", []) if p in auto_platforms()]
+    platforms = [p for p in rec.get("platforms", []) if p in auto_platforms()
+                 and not (p == "tiktok" and rec.get("tiktok_done"))]
+    if only:
+        platforms = [p for p in only if not (p == "tiktok" and rec.get("tiktok_done"))]
     if not platforms:
         return True
     if not key:
@@ -875,14 +878,18 @@ def _post_clip(rec):
             return False
     failed = find_platform_failures(result, platforms)
     with LOCK:
-        rec["results"] = result
-        rec["request_id"] = (result.get("request_id") if isinstance(result, dict) else None) or req_id
+        if only:
+            rec["tiktok_results"] = result
+        else:
+            rec["results"] = result
+            rec["request_id"] = (result.get("request_id") if isinstance(result, dict) else None) or req_id
         ok_platforms = [p for p in platforms if p not in failed]
         if ok_platforms:
             STATE["posts"].append({"id": rec["id"], "platforms": ok_platforms,
                                    "at": now_iso(), "caption": rec.get("caption", "")[:80]})
-        rec["posted_at"] = now_iso()
-        rec["status"] = "posted" if not failed else "partial"
+        if not only:
+            rec["posted_at"] = now_iso()
+            rec["status"] = "posted" if not failed else "partial"
         if "tiktok" in ok_platforms:
             rec["tiktok_done"] = True
         persist()
@@ -2176,6 +2183,33 @@ def r_reveal(d):
     return {"ok": True}
 
 
+def tiktok_post_one(rec):
+    """Send one TikTok Runner clip to TikTok only (Instagram/YouTube untouched)."""
+    with LOCK:
+        if rec["id"] in _POSTING or rec.get("tiktok_done"):
+            return True
+        _POSTING.add(rec["id"])
+    try:
+        return _post_clip(rec, only=["tiktok"])
+    finally:
+        with LOCK:
+            _POSTING.discard(rec["id"])
+
+
+def r_tiktok_post_all(d):
+    """He pressed "Post all to TikTok now": every clip waiting in the TikTok Runner goes to TikTok."""
+    with LOCK:
+        recs = [r for r in STATE["clips"].values()
+                if r.get("status") in ("scheduled", "posted", "partial") and not r.get("missing")
+                and "tiktok" in (r.get("platforms") or []) and not r.get("tiktok_done")]
+    if not recs:
+        return {"ok": True, "posted": 0, "failed": 0, "message": "Nothing waiting for TikTok."}
+    ok = sum(1 for r in recs if tiktok_post_one(r))
+    bad = len(recs) - ok
+    msg = "Posted {} clip(s) to TikTok.".format(ok) + (" {} didn't post. The red banner says why.".format(bad) if bad else "")
+    return {"ok": not bad, "posted": ok, "failed": bad, "message": msg}
+
+
 def r_post_now(d):
     with LOCK:
         rec = STATE["clips"].get(d.get("id"))
@@ -3426,6 +3460,7 @@ ROUTES = {
     "/api/unschedule": r_unschedule,
     "/api/redo": r_redo,
     "/api/tiktok-done": r_tiktok_done,
+    "/api/tiktok-post-all": r_tiktok_post_all,
     "/api/reveal": r_reveal,
     "/api/post-now": r_post_now,
     "/api/captions": r_captions,

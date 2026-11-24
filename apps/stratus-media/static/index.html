@@ -555,7 +555,7 @@ const SHEETS = {
     ${S.clips_scheduled.length ? `<table><tr><th>Clip</th><th>Where</th><th>When</th><th></th></tr>${S.clips_scheduled.map(c => `<tr><td>${esc((c.caption || "").split("\n")[0].slice(0, 60))}</td><td>${c.platforms.map(p => p[0].toUpperCase() + p.slice(1)).join(", ")}</td><td>${esc(c.time_nice)}</td><td class="row"><button class="btn sm go" data-postnow="${esc(c.id)}">Post now</button><button class="btn sm" data-unsched="${esc(c.id)}">Back to desk</button></td></tr>`).join("")}</table>` : `<p class="muted">Nothing scheduled.</p>`}
     <h3>Posted</h3>
     ${S.posted.length ? `<table><tr><th>Clip</th><th>When</th><th>Result</th></tr>${S.posted.map(c => `<tr><td>${esc((c.caption || "").split("\n")[0].slice(0, 60))}</td><td>${esc((c.posted_at || "").replace("T", " ").slice(0, 16))}</td><td>${c.status === "partial" ? "Some platforms failed" : "Posted"}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing posted yet.</p>`}`,
-  tiktok: () => S.tiktok.length ? S.tiktok.map(c => `<div class="box"><b>${esc((c.caption || "").split("\n")[0])}</b><span class="muted">Planned: ${esc(c.time_nice)}</span>
+  tiktok: () => S.tiktok.length ? (S.tiktok_auto ? `<div class="box"><b>${S.tiktok.length} clip(s) waiting for TikTok</b><div class="row"><button class="btn go" data-ttall="1">🚀 Post all to TikTok now</button></div></div>` : "") + S.tiktok.map(c => `<div class="box"><b>${esc((c.caption || "").split("\n")[0])}</b><span class="muted">Planned: ${esc(c.time_nice)}</span>
       <div class="row"><button class="btn go sm" data-copy="${esc(c.id)}">Copy caption</button><button class="btn sm" data-reveal="${esc(c.id)}">Show clip in Finder</button>
       <a class="btn sm" href="https://www.tiktok.com/upload" target="_blank" rel="noopener" style="text-decoration:none">Open TikTok upload</a><button class="btn sm" data-ttdone="${esc(c.id)}">I posted it</button></div></div>`).join("")
     : `<p class="muted">Nothing to post by hand. Clips with TikTok ticked show up here.</p>`,
@@ -1150,6 +1150,7 @@ document.addEventListener("click", async e => {
   if (d.copy) { const c = [...S.tiktok].find(x => x.id === d.copy); return copyText((c.caption || "") + "\n\n" + (c.hashtags || "")); }
   if (d.reveal) return api("/api/reveal", {id: d.reveal});
   if (d.ttdone) return api("/api/tiktok-done", {id: d.ttdone});
+  if (d.ttall) { t.disabled = true; t.textContent = "Posting…"; return api("/api/tiktok-post-all", {}); }
   if (d.model) return api("/api/model", {model: d.model});
   if (d.confirm) return api("/api/confirm", {id: d.confirm, yes: true});
   if (d.cancel) return api("/api/confirm", {id: d.cancel, yes: false});
