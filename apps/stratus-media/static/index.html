@@ -568,7 +568,21 @@ const SHEETS = {
       <div class="muted" style="font-size:12px">YouTube also needs 10M Shorts views in 90 days. TikTok pays from 10k followers, and only for videos over 1 minute. Instagram doesn't pay per view for most creators. Estimated earnings stay $0 until a platform starts paying.</div>
       ${bar("TikTok: 10,000 followers", f.tiktok, 10000)}`;
   },
-  scout: () => `<div class="box"><b>Weekly trend brief</b><span class="muted">Every ${esc(S.workers.find(w => w.id === "scout").doing.replace("Next brief ", "").replace(" · in your project chat", ""))}: 3 video ideas to film, niches take turns. It arrives in your project chat.</span></div>`,
+  scout: () => {
+    const T = S.trends || {}, L = T.latest;
+    const head = `<div class="box"><b>🔭 Nightly trend brief · every night at 8:00 PM</b><span class="muted">What's going viral in your niches (business, success, fitness, anti-aging, dogs, funny) or in general, with my ★ pick. It shows up here by itself.</span><div class="row"><button class="btn sm" data-trendsnow="1">Check for tonight's brief</button>${L && L.link ? `<a class="btn sm" href="${esc(L.link)}" target="_blank" rel="noopener" style="text-decoration:none">Open full brief</a>` : ""}</div></div>`;
+    if (!L) return head + `<p class="muted">The first brief lands tonight around 8:00 PM.</p>`;
+    const day = new Date(L.date + "T12:00:00").toLocaleDateString(undefined, {weekday: "long", month: "short", day: "numeric"});
+    const concerns = L.concerns.length ? `<div class="box" style="border-left:4px solid #d9a400"><b>⚠️ Heads up first</b><ul style="margin:6px 0 0 18px;padding:0">${L.concerns.map(c => `<li>${esc(c)}</li>`).join("")}</ul></div>` : "";
+    const table = `<table><tr><th></th><th>Idea</th><th>Niche</th><th>Why it's hot</th><th>Length</th><th>Post</th></tr>${L.ideas.map(i => `<tr${i.pick ? ' style="background:rgba(212,175,55,.15)"' : ""}><td>${i.pick ? "★" : esc(i.rank)}</td><td><b>${esc(i.title)}</b></td><td>${esc(i.niche)}</td><td>${esc(i.why)}</td><td>${esc(i.length)}</td><td>${esc(i.post_time)}</td></tr>`).join("")}</table>`;
+    const cards = L.ideas.map(i => `<div class="box"${i.pick ? ' style="border:2px solid #d4af37"' : ""}><b>${i.pick ? "★ MY PICK · " : "#" + esc(i.rank) + " · "}${esc(i.title)}</b><span class="muted">${esc(i.niche)} · ${esc(i.length)} · ${esc(i.post_time)}</span>
+      <p style="margin:6px 0"><b>Hook (first 2 s):</b> ${esc(i.hook)}</p>
+      ${i.sound ? `<p style="margin:6px 0"><b>Sound:</b> ${esc(i.sound)}</p>` : ""}
+      <p style="margin:6px 0"><b>Caption:</b> ${esc(i.caption)}</p>
+      ${i.build_plan.length ? `<details><summary>How it gets made</summary><ol style="margin:6px 0 0 18px;padding:0">${i.build_plan.map(x => `<li>${esc(x)}</li>`).join("")}</ol></details>` : ""}</div>`).join("");
+    const hist = T.history.length ? `<h3>Earlier briefs</h3><table><tr><th>Night</th><th>★ Pick</th></tr>${T.history.map(h => `<tr><td>${esc(h.date)}</td><td>${esc(h.pick)}</td></tr>`).join("")}</table>` : "";
+    return head + `<h3>${esc(day)}${L.report ? " · brief #" + esc(L.report) : ""}</h3>` + concerns + table + cards + hist;
+  },
   ugc: () => `
     <div class="setup"><span style="flex:1"><b>New:</b> type the video you want and the dashboard makes it for you.</span><button class="btn go sm" data-gocreate="1">🎥 Open Create</button></div>
     <h3>1 · Your coloring books</h3>
@@ -705,7 +719,7 @@ const DEMO_STEPS = [
    "Caption <b>copied</b>. Open TikTok, add the clip, paste.", "Clip 1 ready for TikTok"],
   ["analyst", "Checks your views every 6 hours and tracks how close you are to getting paid.",
    "Clip 1: <b>1,240 views</b> · 38 likes · 6 shares", "Counting views"],
-  ["scout", "Every Monday at 5:41 AM, sends trending video ideas for your niches.",
+  ["scout", "Every night at 8:00 PM, shows what's going viral in your niches, with 3 video ideas and my ★ pick.",
    "Trending: <b>“morning routine”</b> clips up 40% in fitness this week", "Scanning trends"],
   ["ugc", "Turns your coloring books into promo video ideas you can make in Higgsfield.",
    "Brief: <b>mom and kid coloring the bunny page</b> · 9:16 · 15 seconds", "Writing a video brief"],
@@ -1150,6 +1164,7 @@ document.addEventListener("click", async e => {
   if (d.copy) { const c = [...S.tiktok].find(x => x.id === d.copy); return copyText((c.caption || "") + "\n\n" + (c.hashtags || "")); }
   if (d.reveal) return api("/api/reveal", {id: d.reveal});
   if (d.ttdone) return api("/api/tiktok-done", {id: d.ttdone});
+  if (d.trendsnow) { t.disabled = true; t.textContent = "Checking…"; return api("/api/trends-refresh", {}); }
   if (d.ttall) { t.disabled = true; t.textContent = "Posting…"; return api("/api/tiktok-post-all", {}); }
   if (d.model) return api("/api/model", {model: d.model});
   if (d.confirm) return api("/api/confirm", {id: d.confirm, yes: true});

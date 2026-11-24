@@ -56,7 +56,9 @@ DEFAULT_CONFIG = {
     "clip_weekends_all_day": True,
     "night_run": os.path.join(HOME, "openshorts", "autopilot", "night_run.sh"),
     "morning_stop": os.path.join(HOME, "openshorts", "autopilot", "morning_stop.sh"),
-    "trend_brief": "Mon 5:41 AM",
+    "trend_brief": "Every night 8:00 PM",
+    # Nightly trend brief (written by the cloud Trend Scout, 8 PM Phoenix) is published here as JSON.
+    "trend_feed": "https://raw.githubusercontent.com/nathanmcdonaldj-hub/ECC/claude/project-thread-i0v6qz/trend-briefs/latest.json",
     "ffmpeg": "",
     "default_model": "claude-opus-5-5",
     "models": ["claude-opus-5-5", "claude-sonnet-5-5"],
@@ -1677,7 +1679,7 @@ def build_state(for_model=False):
         worker("analyst", "Analyst", st("Analyst", "ok" if stats["fetched_at"] else "idle"),
                "{:,} views tracked".format(stats["views"]) if stats["views"] is not None else
                ("Numbers start after your first post" if not posted else "Collecting numbers")),
-        worker("scout", "Trend Scout", "off", "Next brief {} · in your project chat".format(CONFIG["trend_brief"])),
+        worker("scout", "Trend Scout", *scout_status()),
         worker("ugc", "UGC Director", st("UGC Director", "idle"),
                "{} book(s) ready for videos".format(len(STATE["books"])) if STATE["books"] else "Add your first coloring book"),
         worker("sales", "Sales Clerk",
@@ -1717,6 +1719,7 @@ def build_state(for_model=False):
         "creations": [create_public(c) for c in STATE.get("creations", [])[-20:]][::-1],
         "warmup": warmup_public(STATE.get("warmup")),
         "hunter": hunter_public(),
+        "trends": trends_public(),
         "warmup_history": STATE.get("warmup_history", [])[::-1],
         "music": list_music(),
         "music_ready": bool(find_ffmpeg()),
@@ -1776,6 +1779,8 @@ def background_loop():
                 if "tiktok" in rec.get("platforms", []) and not rec.get("tiktok_done") and not CONFIG.get("tiktok_auto"):
                     notify_mac("Stratus House · TikTok Runner",
                                "Time to post clip {} on TikTok. Open the dashboard to copy the caption.".format(rec.get("num")))
+            if trends_due():
+                threading.Thread(target=fetch_trends, daemon=True).start()
             h = hunter()
             if h.get("on") and not _HUNT["running"]:
                 last = h.get("last_run") or ""
@@ -1792,6 +1797,110 @@ def background_loop():
         except Exception:  # noqa: BLE001 - the loop must keep running
             sys.stderr.write("[StratusMedia] loop error\n" + traceback.format_exc())
         time.sleep(60)
+
+
+# ---------------------------------------------------------------- Trend Scout (nightly brief)
+# The cloud Trend Scout writes each night's brief (8 PM Phoenix) as JSON to the trend feed.
+# The dashboard pulls it and shows it in the Trend Scout sheet: table, 3 ideas, ★ pick.
+
+_TRENDS = {"last_try": 0.0, "running": False}
+
+
+def _clean_brief(raw):
+    """Keep only the fields we show, as plain text (the page escapes them again).
+    Shape: {report, date, generated_at, brief_url, concerns[], ideas[{rank, pick, niche, title, length,
+    why, hook, caption, sound, post_time, build_plan[]}]}"""
+    if not isinstance(raw, dict) or not raw.get("date"):
+        return None
+    txt = lambda v, n=600: str(v or "")[:n]  # noqa: E731
+    ideas = []
+    for i in (raw.get("ideas") or [])[:5]:
+        if not isinstance(i, dict):
+            continue
+        plan = i.get("build_plan") or []
+        ideas.append({"rank": txt(i.get("rank"), 4), "pick": bool(i.get("pick")),
+                      "niche": txt(i.get("niche"), 60), "title": txt(i.get("title"), 160),
+                      "length": txt(i.get("length"), 40), "why": txt(i.get("why"), 400),
+                      "hook": txt(i.get("hook"), 300), "caption": txt(i.get("caption"), 700),
+                      "sound": txt(i.get("sound"), 200), "post_time": txt(i.get("post_time"), 120),
+                      "build_plan": [txt(x, 300) for x in plan[:10]] if isinstance(plan, list) else []})
+    ideas.sort(key=lambda i: (not i["pick"], i["rank"]))
+    link = txt(raw.get("brief_url"), 300)
+    return {"report": txt(raw.get("report"), 6), "date": txt(raw.get("date"), 10),
+            "made_at": txt(raw.get("generated_at"), 40),
+            "concerns": [txt(c, 300) for c in (raw.get("concerns") or [])[:6]],
+            "ideas": ideas, "link": link if link.startswith("https://") else ""}
+
+
+def fetch_trends():
+    if _TRENDS["running"]:
+        return False
+    _TRENDS["running"] = True
+    _TRENDS["last_try"] = time.time()
+    try:
+        url = CONFIG.get("trend_feed")
+        if not url:
+            return False
+        req = urllib.request.Request(url + "?t={}".format(int(time.time())),
+                                     headers={"User-Agent": "StratusMedia", "Cache-Control": "no-cache"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            brief = _clean_brief(json.loads(resp.read().decode("utf-8")))
+        if not brief:
+            return False
+        with LOCK:
+            t = STATE.setdefault("trends", {"briefs": []})
+            t["checked_at"] = now_iso()
+            briefs = [b for b in t["briefs"] if b.get("date") != brief["date"]]
+            new = len(briefs) == len(t["briefs"])
+            briefs.append(brief)
+            briefs.sort(key=lambda b: b["date"])
+            t["briefs"] = briefs[-14:]
+            persist()
+        if new:
+            pick = next((i for i in brief["ideas"] if i["pick"]), brief["ideas"][0] if brief["ideas"] else None)
+            notify_mac("Stratus House · Trend Scout",
+                       "Tonight's pick: {}".format(pick["title"]) if pick else "Tonight's trend brief is in.")
+        return True
+    except Exception as exc:  # noqa: BLE001 - try again later
+        sys.stderr.write("[TrendScout] fetch failed: {}\n".format(exc))
+        return False
+    finally:
+        _TRENDS["running"] = False
+
+
+def trends_due():
+    """After 8 PM: check every 15 min until tonight's brief is in. Otherwise every 3 hours."""
+    if _TRENDS["running"]:
+        return False
+    age = time.time() - _TRENDS["last_try"]
+    briefs = (STATE.get("trends") or {}).get("briefs") or []
+    today = now().strftime("%Y-%m-%d")
+    if now().hour >= 20 and not any(b.get("date") == today for b in briefs):
+        return age > 15 * 60
+    return age > 3 * 3600
+
+
+def trends_public():
+    t = STATE.get("trends") or {}
+    briefs = t.get("briefs") or []
+    return {"latest": briefs[-1] if briefs else None,
+            "history": [{"date": b["date"], "report": b.get("report", ""),
+                         "pick": next((i["title"] for i in b.get("ideas", []) if i.get("pick")), "")}
+                        for b in reversed(briefs[:-1])][:7],
+            "checked_at": t.get("checked_at"), "when": CONFIG.get("trend_brief")}
+
+
+def scout_status():
+    latest = trends_public()["latest"]
+    if latest and latest["date"] == now().strftime("%Y-%m-%d"):
+        pick = next((i["title"] for i in latest["ideas"] if i.get("pick")), "")
+        return "ok", ("Tonight's pick: " + pick) if pick else "Tonight's brief is in"
+    return "idle", "Next brief tonight 8:00 PM"
+
+
+def r_trends_refresh(d):
+    ok = fetch_trends()
+    return {"ok": ok, "message": "Trend brief updated." if ok else "No new brief yet. It comes in around 8 PM."}
 
 
 # ---------------------------------------------------------------- clipping gate runner
@@ -3534,6 +3643,7 @@ ROUTES = {
     "/api/warmup-stop": r_warmup_stop,
     "/api/hunter-set": r_hunter_set,
     "/api/hunter-run": r_hunter_run,
+    "/api/trends-refresh": r_trends_refresh,
     "/api/hunter-remove": r_hunter_remove,
 }
 
