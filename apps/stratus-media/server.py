@@ -58,7 +58,7 @@ DEFAULT_CONFIG = {
     "morning_stop": os.path.join(HOME, "openshorts", "autopilot", "morning_stop.sh"),
     "trend_brief": "Every night 8:00 PM",
     # Nightly trend brief (written by the cloud Trend Scout, 8 PM Phoenix) is published here as JSON.
-    "trend_feed": "https://raw.githubusercontent.com/nathanmcdonaldj-hub/ECC/claude/project-thread-i0v6qz/trend-briefs/latest.json",
+    "trend_feed": "https://raw.githubusercontent.com/nathanmcdonaldj-hub/ECC/claude/project-thread-p72cad/trend-briefs/latest.json",
     "ffmpeg": "",
     "default_model": "claude-opus-5-5",
     "models": ["claude-opus-5-5", "claude-sonnet-5-5"],
