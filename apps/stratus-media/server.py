@@ -48,6 +48,7 @@ DEFAULT_CONFIG = {
     "upload_post_profile": "MAIN",
     "upload_post_monthly_limit": 10,   # 0 = unlimited (Upload-Post Basic)
     "tiktok_auto": False,              # True = Upload-Post posts to TikTok too (Basic plan)
+    "end_tag": True,                   # his OK 2026-11-24: 2 s liquid-gold SH tag on the end of every clip
     # Clipping hours: weekdays from market close until morning, weekends all day.
     "clip_weekday_open": "14:30",
     "clip_close": "06:30",
@@ -669,6 +670,49 @@ def media_duration(ff, path):
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)) if m else None
 
 
+END_TAG = os.path.join(APP_DIR, "assets", "endtag.mp4")
+
+
+def video_info(ff, path):
+    """(width, height, has_audio) read from ffmpeg's header lines."""
+    res = subprocess.run([ff, "-hide_banner", "-i", path], capture_output=True, text=True, timeout=60)
+    m = re.search(r"Video:.*?\b(\d{2,5})x(\d{2,5})\b", res.stderr)
+    w, h = (int(m.group(1)), int(m.group(2))) if m else (1080, 1920)
+    return w - w % 2, h - h % 2, "Audio:" in res.stderr
+
+
+def add_end_tag(src):
+    """Return a copy of `src` with the 2-second Stratus House end tag on the end.
+    Built once per clip and reused; on any problem the clip posts without the tag."""
+    if not CONFIG.get("end_tag", True) or not os.path.exists(END_TAG):
+        return src
+    ff = find_ffmpeg()
+    if not ff:
+        return src
+    out = os.path.splitext(src)[0].replace(".music", "") + ".music.endtag.mp4"
+    if os.path.exists(out) and os.path.getmtime(out) >= max(os.path.getmtime(src), os.path.getmtime(END_TAG)):
+        return out
+    w, h, audio = video_info(ff, src)
+    norm = "fps=30,format=yuv420p,setsar=1"
+    graph = ("[0:v]scale={w}:{h},{n}[v0];"
+             "[1:v]scale={w}:{h}:force_original_aspect_ratio=decrease,"
+             "pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x000C40,{n}[v1];"
+             "{a0}aresample=48000,aformat=channel_layouts=stereo[a0];"
+             "[1:a]aresample=48000,aformat=channel_layouts=stereo[a1];"
+             "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]").format(
+                 w=w, h=h, n=norm, a0="[0:a]" if audio else "[2:a]")
+    cmd = [ff, "-y", "-loglevel", "error", "-i", src, "-i", END_TAG]
+    if not audio:
+        cmd += ["-f", "lavfi", "-t", "{:.3f}".format(media_duration(ff, src) or 1), "-i", "anullsrc=r=48000:cl=stereo"]
+    cmd += ["-filter_complex", graph, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast",
+            "-crf", "20", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out]
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    if res.returncode != 0 or not os.path.exists(out):
+        print("[EndTag] skipped for {}: {}".format(os.path.basename(src), (res.stderr or "")[-200:]), file=sys.stderr)
+        return src
+    return out
+
+
 def wants_mix(rec):
     return (rec.get("music") or "none") != "none" or bool((rec.get("voice_text") or "").strip())
 
@@ -839,6 +883,10 @@ def _post_clip(rec, only=None):
         except Exception as exc:  # noqa: BLE001 - shown to the user in plain words
             music_error(rec, exc)
             return False
+    try:
+        path = add_end_tag(path)
+    except Exception as exc:  # noqa: BLE001 - never block a post over the tag
+        print("[EndTag] skipped: {}".format(exc), file=sys.stderr)
     used = posts_this_month()
     if CONFIG["upload_post_monthly_limit"] and used + len(platforms) > CONFIG["upload_post_monthly_limit"]:
         raise_error("Courier", "Free posting limit reached",
