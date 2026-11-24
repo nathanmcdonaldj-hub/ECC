@@ -686,6 +686,8 @@ def add_end_tag(src):
     Built once per clip and reused; on any problem the clip posts without the tag."""
     if not CONFIG.get("end_tag", True) or not os.path.exists(END_TAG):
         return src
+    if os.path.basename(src).lower().startswith("stratus house"):
+        return src  # our own finished videos (e.g. Black Friday) already carry the tag
     ff = find_ffmpeg()
     if not ff:
         return src
