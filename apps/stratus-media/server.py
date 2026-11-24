@@ -46,7 +46,8 @@ DEFAULT_CONFIG = {
     "keys_env": os.path.join(HOME, "openshorts", "autopilot-keys.env"),
     "autopilot_log": os.path.join(HOME, "openshorts", "autopilot.log"),
     "upload_post_profile": "MAIN",
-    "upload_post_monthly_limit": 10,
+    "upload_post_monthly_limit": 10,   # 0 = unlimited (Upload-Post Basic)
+    "tiktok_auto": False,              # True = Upload-Post posts to TikTok too (Basic plan)
     # Clipping hours: weekdays from market close until morning, weekends all day.
     "clip_weekday_open": "14:30",
     "clip_close": "06:30",
@@ -814,7 +815,7 @@ def _post_clip(rec):
     """Post one approved clip to its auto platforms. Returns True on success."""
     key = secrets().get("upload_post_key")
     name = "clip {} from {}".format(rec.get("num"), rec.get("source"))
-    platforms = [p for p in rec.get("platforms", []) if p in ("instagram", "youtube")]
+    platforms = [p for p in rec.get("platforms", []) if p in auto_platforms()]
     if not platforms:
         return True
     if not key:
@@ -836,7 +837,7 @@ def _post_clip(rec):
             music_error(rec, exc)
             return False
     used = posts_this_month()
-    if used + len(platforms) > CONFIG["upload_post_monthly_limit"]:
+    if CONFIG["upload_post_monthly_limit"] and used + len(platforms) > CONFIG["upload_post_monthly_limit"]:
         raise_error("Courier", "Free posting limit reached",
                     "{} needs {} post(s) but only {} of your {} free posts are left this month."
                     .format(name, len(platforms), max(0, CONFIG["upload_post_monthly_limit"] - used),
@@ -850,6 +851,8 @@ def _post_clip(rec):
     for p in platforms:
         fields.append(("platform[]", p))
     fields.append(("instagram_title", full_caption(rec)))
+    if "tiktok" in platforms:
+        fields.append(("tiktok_title", full_caption(rec)[:2200]))
     if CONFIG.get("dry_run_posting"):
         result = {"dry_run": True, "fields": [f[0] for f in fields]}
     else:
@@ -880,6 +883,8 @@ def _post_clip(rec):
                                    "at": now_iso(), "caption": rec.get("caption", "")[:80]})
         rec["posted_at"] = now_iso()
         rec["status"] = "posted" if not failed else "partial"
+        if "tiktok" in ok_platforms:
+            rec["tiktok_done"] = True
         persist()
     for p, why in failed.items():
         raise_error("Courier", "Couldn't post {} to {}".format(name, p.title()),
@@ -923,6 +928,11 @@ def explain_post_http_error(name, code, detail):
     raise_error("Courier", "Couldn't post " + name, what, fix,
                 action="settings" if code in (401, 403) else None,
                 key="post:http:{}".format(code))
+
+
+def auto_platforms():
+    """Platforms Upload-Post posts for him. TikTok joins once he's on the Basic plan."""
+    return ("instagram", "youtube", "tiktok") if CONFIG.get("tiktok_auto") else ("instagram", "youtube")
 
 
 def posts_this_month():
@@ -1638,6 +1648,7 @@ def build_state(for_model=False):
         "errors": errors,
         "posts_used": used,
         "posts_limit": CONFIG["upload_post_monthly_limit"],
+        "tiktok_auto": bool(CONFIG.get("tiktok_auto")),
         "stats": stats,
         "sales": sales,
     }
@@ -1699,13 +1710,13 @@ def background_loop():
                 if rec["id"] in _POSTING or rec.get("status") != "scheduled":
                     continue
                 rec.pop("retry_at", None)
-                if any(p in ("instagram", "youtube") for p in rec.get("platforms", [])):
+                if any(p in auto_platforms() for p in rec.get("platforms", [])):
                     post_clip(rec)
                 else:
                     rec["status"] = "posted"
                     rec["posted_at"] = now_iso()
                     persist()
-                if "tiktok" in rec.get("platforms", []) and not rec.get("tiktok_done"):
+                if "tiktok" in rec.get("platforms", []) and not rec.get("tiktok_done") and not CONFIG.get("tiktok_auto"):
                     notify_mac("Stratus House · TikTok Runner",
                                "Time to post clip {} on TikTok. Open the dashboard to copy the caption.".format(rec.get("num")))
             h = hunter()

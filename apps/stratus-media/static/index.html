@@ -444,7 +444,7 @@ function render() {
   $("#kpis").innerHTML = `
     <button class="kpi ${S.clips_waiting.length ? "hi" : ""}" data-open="desk"><div class="v">${S.clips_waiting.length}</div><div class="k">Clips need your OK</div></button>
     <button class="kpi" data-open="analyst"><div class="v">${st.views == null ? "–" : st.views.toLocaleString()}</div><div class="k">Views tracked</div></button>
-    <button class="kpi" data-open="courier"><div class="v">${S.posts_used} / ${S.posts_limit}</div><div class="k">Free posts this month</div></button>
+    <button class="kpi" data-open="courier"><div class="v">${S.posts_limit ? S.posts_used + " / " + S.posts_limit : S.posts_used}</div><div class="k">${S.posts_limit ? "Free posts this month" : "Posts this month · unlimited"}</div></button>
     <button class="kpi" data-open="sales"><div class="v">${S.sales.imported_at ? "$" + S.sales.royalty.toLocaleString(undefined,{minimumFractionDigits:2}) : "–"}</div><div class="k">Book royalties (last report)</div></button>`;
   const W = Object.fromEntries(S.workers.map(w => [w.id, w]));
   const floorHTML = LANES.map(([title, ids], i) => `
@@ -492,7 +492,7 @@ function renderSheet(id, soft) {
 }
 
 const platformChips = (sel, key) => ["instagram","youtube","tiktok"].map(p =>
-  `<button class="chip ${sel.includes(p) ? "on" : ""}" data-plat="${p}" data-key="${esc(key)}">${{instagram:"Instagram",youtube:"YouTube",tiktok:"TikTok (you post)"}[p]}</button>`).join("");
+  `<button class="chip ${sel.includes(p) ? "on" : ""}" data-plat="${p}" data-key="${esc(key)}">${{instagram:"Instagram",youtube:"YouTube",tiktok: S.tiktok_auto ? "TikTok" : "TikTok (you post)"}[p]}</button>`).join("");
 function voiceSelect(cur) {
   const vs = (S.voices || []).map(v => typeof v === "string" ? {id: v, label: v, group: "Mac voices"} : v);
   const sel = vs.some(v => v.id === cur) ? cur : (vs[0] || {}).id;
@@ -549,8 +549,8 @@ const SHEETS = {
         </div></div>`).join("") + approved;
   },
   courier: () => `
-    <div class="box"><b>${S.posts_used} of ${S.posts_limit} free posts used this month</b><div class="prog"><i style="width:${Math.min(100, S.posts_used / S.posts_limit * 100)}%"></i></div>
-      <span class="muted" style="font-size:12px">Each platform counts as one post. Upload-Post Basic ($24/mo) removes the limit and adds TikTok.</span></div>
+    ${S.posts_limit ? `<div class="box"><b>${S.posts_used} of ${S.posts_limit} free posts used this month</b><div class="prog"><i style="width:${Math.min(100, S.posts_used / S.posts_limit * 100)}%"></i></div>` : `<div class="box"><b>${S.posts_used} posts this month · Upload-Post Basic, no limit${S.tiktok_auto ? " · TikTok posts by itself" : ""}</b>`}
+      ${S.posts_limit ? `<span class="muted" style="font-size:12px">Each platform counts as one post. Upload-Post Basic ($24/mo) removes the limit and adds TikTok.</span>` : ""}</div>
     <h3>Scheduled</h3>
     ${S.clips_scheduled.length ? `<table><tr><th>Clip</th><th>Where</th><th>When</th><th></th></tr>${S.clips_scheduled.map(c => `<tr><td>${esc((c.caption || "").split("\n")[0].slice(0, 60))}</td><td>${c.platforms.map(p => p[0].toUpperCase() + p.slice(1)).join(", ")}</td><td>${esc(c.time_nice)}</td><td class="row"><button class="btn sm go" data-postnow="${esc(c.id)}">Post now</button><button class="btn sm" data-unsched="${esc(c.id)}">Back to desk</button></td></tr>`).join("")}</table>` : `<p class="muted">Nothing scheduled.</p>`}
     <h3>Posted</h3>
