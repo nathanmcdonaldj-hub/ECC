@@ -1,15 +1,64 @@
 {
-  "report": 2,
-  "date": "2026-11-23",
-  "generated_at": "2026-11-23T12:45:00Z",
+  "report": 3,
+  "date": "2026-11-24",
+  "generated_at": "2026-11-25T02:58:00Z",
   "brief_url": "https://claude.ai/artifact/Rgsoo6L6GFFQZJ4FiHALvr",
   "concerns": [
-    "Post times are general peak hours; no audience data yet.",
-    "SNL sound may be blocked on TikTok business accounts, Instagram and YouTube."
+    "AI anatomy diagrams can mislabel muscles; every label is checked before #3 goes for approval.",
+    "Multipliers come from 8-18 accounts per format; a signal, not a guarantee.",
+    "#2 sticks to well-known habits; no medical promises."
   ],
   "ideas": [
-    {"rank": 1, "pick": true, "niche": "Funny", "title": "\"Pay full price?\" Black Friday", "length": "7-10 s", "why": "+52,400% this week, 525 creators", "hook": "When your friend buys a TV on Thanksgiving morning...", "caption": "Two more days. That's all you had to wait. Tag the friend who does this. #blackfriday #funny #relatable #thanksgiving", "sound": "He wanna pay full price (SNL clip)", "post_time": "Tue Nov 24 or Wed Nov 25, 6-8 PM Phoenix"},
-    {"rank": 2, "pick": false, "niche": "Anti-aging", "title": "Floor-to-stand test", "length": "20-30 s", "why": "Format at 17x usual views", "hook": "Try this right now. It says a lot about how you're aging.", "caption": "What's your score out of 10? Save this and test again in 30 days. #antiaging #longevity #healthyaging #over40", "sound": "Voice + quiet instrumental", "post_time": "Mon Nov 30, 6-8 AM Phoenix"},
-    {"rank": 3, "pick": false, "niche": "Success", "title": "My 2026 in 15 seconds", "length": "12-15 s", "why": "New this week, 193 creators", "hook": "Jan to Nov. Nobody saw most of this.", "caption": "11 months. Still building. What's yours been like? #success #motivation #2026recap #entrepreneurlife", "sound": "Trend's own sound or IG trending sound", "post_time": "Sun Nov 29, 6-8 PM Phoenix"}
+    {
+      "rank": 1,
+      "pick": true,
+      "niche": "Success",
+      "title": "\"It isn't a loss. It means...\"",
+      "length": "15-20 s",
+      "why": "21x usual views, 8 accounts (Volume, Nov 23)",
+      "hook": "Getting told no isn't a loss. It means you're finally asking for more.",
+      "caption": "Bad day? Read this twice. Save it for the next one. #success #mindset #entrepreneur #motivation",
+      "sound": "AI voice + slow piano from app library (business-safe)",
+      "post_time": "Wed Nov 25, 6-8 PM Phoenix (Thanksgiving-eve scrolling)",
+      "build_plan": [
+        "AI visuals: 3 dark cinematic shots (empty office at night, closed door, phone face-down), 5 s each",
+        "AI voice: deep calm read of 3 reframes (no, losing a client, working alone)",
+        "Text: each line as big captions, end on 'Save this for the next bad day.'"
+      ]
+    },
+    {
+      "rank": 2,
+      "pick": false,
+      "niche": "Anti-aging",
+      "title": "9 things that age you faster",
+      "length": "10-12 s",
+      "why": "10x usual views, 18 accounts (Volume, Nov 23)",
+      "hook": "9 things aging you faster than your birthday.",
+      "caption": "How many are you doing? Be honest. #antiaging #longevity #healthyaging #over40",
+      "sound": "Soft ambient from app library",
+      "post_time": "Mon Nov 30, 6-8 AM Phoenix (Monday health reset)",
+      "build_plan": [
+        "AI visuals: one calm sunrise walking shot, 10 s",
+        "Text: all 9 habits on screen at once",
+        "AI voice reads only the hook; list stays silent so people pause"
+      ]
+    },
+    {
+      "rank": 3,
+      "pick": false,
+      "niche": "Fitness",
+      "title": "One move, 9 muscles",
+      "length": "12-15 s",
+      "why": "7x usual views, 18 accounts (Volume, Nov 23)",
+      "hook": "One move. 9 muscles. Do it after Thanksgiving.",
+      "caption": "Save this for Friday morning. #fitness #workout #thanksgiving #over40fitness",
+      "sound": "Upbeat track from app library",
+      "post_time": "Fri Nov 27, 7-9 AM Phoenix (post-holiday workout searches)",
+      "build_plan": [
+        "AI visuals: 3D anatomy figure doing a goblet squat, slow motion",
+        "Text: muscles light up and get labeled one by one (labels verified)",
+        "AI voice: 'Ten reps. Three rounds. You earned the pie.'"
+      ]
+    }
   ]
 }
