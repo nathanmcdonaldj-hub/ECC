@@ -984,7 +984,7 @@ function renderHunter(force) {
   const items = h.items || [];
   v.innerHTML = `<div class="cwrap"><div class="cform">
       <label class="hidesw" style="padding:14px"><input type="checkbox" id="hOn" ${h.on ? "checked" : ""}><span class="knob"></span>
-        <span><b style="font-size:16px">Clip Hunter is ${h.on ? "ON" : "OFF"}</b><small>${h.on ? "Searches every " + h.every + (h.every == 1 ? " hour" : " hours") + (h.next ? " · next " + esc(h.next) : "") : "Turn on to search every " + h.every + (h.every == 1 ? " hour" : " hours") + " by itself"}</small></span></label>
+        <span><b style="font-size:16px">Clip Hunter is ${h.on ? "ON" : "OFF"}</b></span></label>
       <div class="row" style="align-items:center;gap:10px;margin:2px 0 4px"><span>⏱ Search automatically every</span>
         <select id="hEvery" style="width:auto;min-width:120px" aria-label="How often Clip Hunter searches">${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}" ${n == (h.every || 2) ? "selected" : ""}>${n} hour${n === 1 ? "" : "s"}</option>`).join("")}</select></div>
       <h3>1 · Where to look</h3>
