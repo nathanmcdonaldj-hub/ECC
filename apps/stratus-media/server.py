@@ -459,7 +459,7 @@ def scan_clips():
             rec = STATE["clips"].get(cid)
             if rec is None:
                 rec = {"status": "new", "caption": "", "hashtags": "",
-                       "platforms": ["instagram", "youtube"],
+                       "platforms": list(auto_platforms()),
                        "time": suggest_time(sum(1 for r in STATE["clips"].values() if r.get("status") in ("new", "ready"))),
                        "why": "", "music": "auto", "added": now_iso()}
                 STATE["clips"][cid] = rec
@@ -1554,7 +1554,7 @@ def write_captions(force_ids=None):
             rec["caption"] = it.get("caption", "").strip()
             rec["hashtags"] = it.get("hashtags", "").strip()
             pl = [p for p in it.get("platforms", []) if p in ("instagram", "youtube", "tiktok")]
-            rec["platforms"] = pl or ["instagram", "youtube"]
+            rec["platforms"] = list(dict.fromkeys(pl + list(auto_platforms())))
             t = it.get("time") or ""
             rec["time"] = t if re.match(r"\d{4}-\d\d-\d\dT\d\d:\d\d$", t) else suggest_time(i)
             rec["why"] = it.get("why", "")
@@ -2479,8 +2479,7 @@ def r_set_caption(d):
         rec["hashtags"] = (d.get("hashtags") or "").strip()
         if "yt_title" in d:
             rec["yt_title"] = (d.get("yt_title") or "").strip()
-        if not rec.get("platforms"):
-            rec["platforms"] = list(auto_platforms())
+        rec["platforms"] = list(dict.fromkeys((rec.get("platforms") or []) + list(auto_platforms())))
         if not rec.get("time"):
             rec["time"] = suggest_time(0)
         rec["status"] = "ready"
