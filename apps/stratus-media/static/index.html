@@ -523,7 +523,7 @@ const SHEETS = {
     const sched = S.clips_scheduled || [];
     const approved = sched.length ? `<h3>✅ Approved · waiting in Courier (${sched.length})</h3>
       <table><tr><th>Clip</th><th>Posts</th><th></th></tr>${sched.map(c => `<tr><td>${esc((c.caption || "Clip " + c.num).split("\n")[0].slice(0, 50))}</td><td><b>${esc(c.time_nice)}</b><br><span class="muted" style="font-size:11px">${(c.platforms || []).map(p => PLAT[p] || p).join(", ")}</span></td>
-        <td class="row"><button class="btn sm go" data-postnow="${esc(c.id)}">🚀 Post now</button><button class="btn sm" data-unsched="${esc(c.id)}">Back to desk</button></td></tr>`).join("")}</table>` : "";
+        <td class="row">${c.posting ? `<span class="muted">⏳ Posting…</span>` : `<button class="btn sm go" data-postnow="${esc(c.id)}">🚀 Post now</button>`}<button class="btn sm" data-unsched="${esc(c.id)}">Back to desk</button></td></tr>`).join("")}</table>` : "";
     if (!list.length) return `<p class="muted">Nothing waiting on you. New clips show up here each morning.</p>` + approved;
     return (list.some(c => c.status === "new") ? `<div class="box"><span>Some clips have no captions yet.</span><div><button class="btn go" id="capGo">Write captions now</button></div></div>` : "") +
       list.map(c => `<div class="clipcard" data-clip="${esc(c.id)}">
@@ -552,7 +552,7 @@ const SHEETS = {
     ${S.posts_limit ? `<div class="box"><b>${S.posts_used} of ${S.posts_limit} free posts used this month</b><div class="prog"><i style="width:${Math.min(100, S.posts_used / S.posts_limit * 100)}%"></i></div>` : `<div class="box"><b>${S.posts_used} posts this month · Upload-Post Basic, no limit${S.tiktok_auto ? " · TikTok posts by itself" : ""}</b>`}
       ${S.posts_limit ? `<span class="muted" style="font-size:12px">Each platform counts as one post. Upload-Post Basic ($24/mo) removes the limit and adds TikTok.</span>` : ""}</div>
     <h3>Scheduled</h3>
-    ${S.clips_scheduled.length ? `<table><tr><th>Clip</th><th>Where</th><th>When</th><th></th></tr>${S.clips_scheduled.map(c => `<tr><td>${esc((c.caption || "").split("\n")[0].slice(0, 60))}</td><td>${c.platforms.map(p => p[0].toUpperCase() + p.slice(1)).join(", ")}</td><td>${esc(c.time_nice)}</td><td class="row"><button class="btn sm go" data-postnow="${esc(c.id)}">Post now</button><button class="btn sm" data-unsched="${esc(c.id)}">Back to desk</button></td></tr>`).join("")}</table>` : `<p class="muted">Nothing scheduled.</p>`}
+    ${S.clips_scheduled.length ? `<table><tr><th>Clip</th><th>Where</th><th>When</th><th></th></tr>${S.clips_scheduled.map(c => `<tr><td>${esc((c.caption || "").split("\n")[0].slice(0, 60))}</td><td>${c.platforms.map(p => p[0].toUpperCase() + p.slice(1)).join(", ")}</td><td>${esc(c.time_nice)}</td><td class="row">${c.posting ? `<span class="muted">⏳ Posting…</span>` : `<button class="btn sm go" data-postnow="${esc(c.id)}">Post now</button>`}<button class="btn sm" data-unsched="${esc(c.id)}">Back to desk</button></td></tr>`).join("")}</table>` : `<p class="muted">Nothing scheduled.</p>`}
     <h3>Posted</h3>
     ${S.posted.length ? `<table><tr><th>Clip</th><th>When</th><th>Result</th></tr>${S.posted.map(c => `<tr><td>${esc((c.caption || "").split("\n")[0].slice(0, 60))}</td><td>${esc((c.posted_at || "").replace("T", " ").slice(0, 16))}</td><td>${c.status === "partial" ? "Some platforms failed" : "Posted"}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing posted yet.</p>`}`,
   tiktok: () => S.tiktok.length ? (S.tiktok_auto ? `<div class="box"><b>${S.tiktok.length} clip(s) waiting for TikTok</b><div class="row"><button class="btn go" data-ttall="1">🚀 Post all to TikTok now</button></div></div>` : "") + S.tiktok.map(c => `<div class="box"><b>${esc((c.caption || "").split("\n")[0])}</b><span class="muted">Planned: ${esc(c.time_nice)}</span>
@@ -847,7 +847,7 @@ function renderLive(force) {
       const plats = (p.platforms || []).map(pl => {
         const m = (p.metrics || {})[pl] || {};
         const label = PLAT[pl] || pl;
-        const extra = pl === "tiktok" ? " <small>· posted by you</small>" : (typeof m.views === "number" ? ` <small>· ${fmtN(m.views)} views</small>` : "");
+        const extra = (pl === "tiktok" && !S.tiktok_auto && !p.outside) ? " <small>· posted by you</small>" : (typeof m.views === "number" ? ` <small>· ${fmtN(m.views)} views</small>` : "");
         return m.url ? `<a class="plat" href="${esc(m.url)}" target="_blank" rel="noopener">${label}${extra} ↗</a>` : `<span class="plat">${label}${extra}</span>`;
       }).join("");
       return `<div class="post">

@@ -482,7 +482,8 @@ def clip_public(rec):
     out = {k: rec.get(k) for k in (
         "id", "source", "num", "status", "caption", "hashtags", "platforms",
         "time", "why", "music", "voice_text", "voice", "voice_when", "notes", "posted_at", "results", "missing",
-        "tiktok_done", "redo", "metrics", "metrics_at")}
+        "tiktok_done", "redo", "metrics", "metrics_at", "outside")}
+    out["posting"] = rec["id"] in _POSTING
     out["video_url"] = "/media?f=" + urllib.parse.quote(rec["id"])
     out["thumb_url"] = ("/media?thumb=1&f=" + urllib.parse.quote(rec["id"])) if rec.get("thumb") else None
     out["time_nice"] = nice_time(rec.get("time"))
@@ -710,6 +711,8 @@ def add_end_tag(src):
         cmd += ["-f", "lavfi", "-t", "{:.3f}".format(media_duration(ff, src) or 1), "-i", "anullsrc=r=48000:cl=stereo"]
     cmd += ["-filter_complex", graph, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast",
             "-crf", "20", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out]
+    if shutil.which("nice"):
+        cmd = ["nice", "-n", "10"] + cmd   # keep the dashboard (and the trading desk) snappy
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
     if res.returncode != 0 or not os.path.exists(out):
         print("[EndTag] skipped for {}: {}".format(os.path.basename(src), (res.stderr or "")[-200:]), file=sys.stderr)
@@ -1036,38 +1039,47 @@ def fetch_post_stats(max_age_days=60):
         return 0
     cutoff = (now() - timedelta(days=max_age_days)).strftime("%Y-%m-%d")
     with LOCK:
-        recs = [r for r in STATE["clips"].values() if r.get("request_id")
+        recs = [r for r in STATE["clips"].values() if (r.get("request_id") or r.get("request_ids"))
                 and r.get("status") in ("posted", "partial") and (r.get("posted_at") or "") >= cutoff]
     done = 0
     for rec in recs:
-        url = POST_ANALYTICS_URL.format(urllib.parse.quote(rec["request_id"]))
-        req = urllib.request.Request(url, headers={"Authorization": "Apikey " + key})
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode("utf-8") or "{}")
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                continue  # not visible yet; next round
-            raise_error("Analyst", "Couldn't get numbers for your posts",
-                        "Upload-Post's per-post stats answered with error {}.".format(exc.code),
-                        "Nothing to do. I'll try again in 6 hours. Your posts are fine.", key="stats:post")
-            return done
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-            return done  # offline: try later
-        metrics = {}
-        for plat, info in ((data or {}).get("platforms") or {}).items():
-            if not isinstance(info, dict):
-                continue
-            pm = info.get("post_metrics") or {}
-            metrics[plat] = {k: pm.get(k) for k in METRIC_KEYS if isinstance(pm.get(k), (int, float))}
-            metrics[plat]["url"] = info.get("post_url")
-            if info.get("post_metrics_error"):
-                metrics[plat]["note"] = str(info["post_metrics_error"])[:120]
+        rids = list(rec.get("request_ids") or [])
+        if rec.get("request_id") and rec["request_id"] not in rids:
+            rids.insert(0, rec["request_id"])
+        metrics = dict(rec.get("metrics") or {})
+        got = False
+        for rid in rids:
+            url = POST_ANALYTICS_URL.format(urllib.parse.quote(rid))
+            req = urllib.request.Request(url, headers={"Authorization": "Apikey " + key})
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    data = json.loads(resp.read().decode("utf-8") or "{}")
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    continue  # not visible yet; next round
+                raise_error("Analyst", "Couldn't get numbers for your posts",
+                            "Upload-Post's per-post stats answered with error {}.".format(exc.code),
+                            "Nothing to do. I'll try again in 6 hours. Your posts are fine.", key="stats:post")
+                return done
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+                return done  # offline: try later
+            for plat, info in ((data or {}).get("platforms") or {}).items():
+                if not isinstance(info, dict):
+                    continue
+                pm = info.get("post_metrics") or {}
+                m = {k: pm.get(k) for k in METRIC_KEYS if isinstance(pm.get(k), (int, float))}
+                m["url"] = info.get("post_url") or (metrics.get(plat) or {}).get("url")
+                if info.get("post_metrics_error"):
+                    m["note"] = str(info["post_metrics_error"])[:120]
+                metrics[plat] = m
+            got = True
+            time.sleep(1)  # stay far below Upload-Post's 100 requests / 5 minutes
+        if not got:
+            continue
         with LOCK:
             rec["metrics"] = metrics
             rec["metrics_at"] = now_iso()
         done += 1
-        time.sleep(1)  # stay far below Upload-Post's 100 requests / 5 minutes
     if done:
         persist()
         resolve_errors("stats:post")
@@ -2363,10 +2375,49 @@ def r_tiktok_post_all(d):
                 and "tiktok" in (r.get("platforms") or []) and not r.get("tiktok_done")]
     if not recs:
         return {"ok": True, "posted": 0, "failed": 0, "message": "Nothing waiting for TikTok."}
-    ok = sum(1 for r in recs if tiktok_post_one(r))
-    bad = len(recs) - ok
-    msg = "Posted {} clip(s) to TikTok.".format(ok) + (" {} didn't post. The red banner says why.".format(bad) if bad else "")
-    return {"ok": not bad, "posted": ok, "failed": bad, "message": msg}
+    if d.get("wait"):
+        ok = sum(1 for r in recs if tiktok_post_one(r))
+        bad = len(recs) - ok
+        msg = "Posted {} clip(s) to TikTok.".format(ok) + (" {} didn't post. The red banner says why.".format(bad) if bad else "")
+        return {"ok": not bad, "posted": ok, "failed": bad, "message": msg}
+    threading.Thread(target=lambda: [tiktok_post_one(r) for r in recs], daemon=True).start()
+    return {"ok": True, "posted": 0, "failed": 0,
+            "message": "Sending {} clip(s) to TikTok in the background.".format(len(recs))}
+
+
+def r_record_post(d):
+    """Show a video that was posted outside the Approve flow (e.g. a finished skit posted
+    straight through Upload-Post) in Live Posts, with its links and numbers."""
+    f = d.get("file") or ""
+    plats = [p for p in (d.get("platforms") or []) if p in ("instagram", "youtube", "tiktok")]
+    if not os.path.isfile(f) or not plats:
+        return {"ok": False, "message": "Need the video file and at least one platform."}
+    cid = "outside/" + os.path.basename(f)
+    ff = find_ffmpeg()
+    thumb = os.path.splitext(f)[0] + ".jpg"
+    if ff and not os.path.exists(thumb):
+        subprocess.run([ff, "-y", "-loglevel", "error", "-ss", "1", "-i", f, "-frames:v", "1",
+                        "-vf", "scale=360:-2", thumb], capture_output=True, timeout=60)
+    urls = d.get("urls") or {}
+    with LOCK:
+        rec = STATE["clips"].get(cid) or {}
+        rec.update({
+            "id": cid, "source": d.get("source") or "Posted directly", "file": f, "num": 1,
+            "thumb": thumb if os.path.exists(thumb) else None,
+            "caption": d.get("caption") or rec.get("caption", ""), "hashtags": "",
+            "platforms": plats, "status": "posted", "missing": False, "outside": True,
+            "posted_at": d.get("posted_at") or rec.get("posted_at") or now_iso(),
+            "request_ids": [str(x) for x in (d.get("request_ids") or rec.get("request_ids") or []) if x],
+            "tiktok_done": True,
+        })
+        m = rec.setdefault("metrics", {})
+        for p, u in urls.items():
+            if p in plats and str(u).startswith("https://"):
+                m.setdefault(p, {})["url"] = u
+        STATE["clips"][cid] = rec
+        persist()
+    threading.Thread(target=fetch_post_stats, daemon=True).start()
+    return {"ok": True, "id": cid, "message": "Added to Live Posts."}
 
 
 def r_post_now(d):
@@ -2380,8 +2431,9 @@ def r_post_now(d):
         rec["time"] = now().strftime("%Y-%m-%dT%H:%M")
         rec.pop("retry_at", None)
         persist()
-    ok = post_clip(rec)
-    return {"ok": ok, "message": "Posted." if ok else "It didn't post. The red banner says why."}
+    # Upload in the background so the dashboard never freezes while a big video uploads.
+    threading.Thread(target=post_clip, args=(rec,), daemon=True).start()
+    return {"ok": True, "message": "Posting now. It moves to Live Posts when it's done (about a minute)."}
 
 
 def r_captions(d):
@@ -3620,6 +3672,7 @@ ROUTES = {
     "/api/redo": r_redo,
     "/api/tiktok-done": r_tiktok_done,
     "/api/tiktok-post-all": r_tiktok_post_all,
+    "/api/record-post": r_record_post,
     "/api/reveal": r_reveal,
     "/api/post-now": r_post_now,
     "/api/captions": r_captions,
