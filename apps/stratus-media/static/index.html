@@ -248,6 +248,7 @@ body.demo .st.done{opacity:.75}
 <div class="wrap">
   <div class="hero"><img src="/static/banner.jpg" alt="Stratus House"><div class="bar">
     <span class="gatebox"><button class="gate" id="gateBtn" title="Open or close clipping">…</button><small id="gateNote"></small></span>
+    <button class="pill" id="awakeBtn" title="Keep your Mac from going to sleep so posting and clipping keep running">☕ Stays awake</button>
     <button class="pill" id="demoBtn">▶ Demo</button>
     <button class="pill" id="settingsBtn">⚙ Settings</button>
     <button class="pill g" id="talkBtn">🎙 Talk to manager</button>
@@ -424,7 +425,14 @@ function overrideModal() {
     <div class="row"><button class="btn" data-ovr="no">Cancel</button><button class="btn go" data-ovr="yes">Yes, override</button></div></div>`;
   document.body.appendChild(m);
 }
+function renderAwake() {
+  const b = $("#awakeBtn"); if (!b || !S) return;
+  const on = S.settings.stay_awake;
+  b.textContent = on ? (S.settings.awake_active ? "☕ Stays awake" : "☕ Stays awake (not running)") : "💤 Can sleep";
+  b.setAttribute("aria-pressed", on ? "true" : "false");
+}
 function render() {
+  renderAwake();
   renderGate();
   renderLive(false);
   renderCreate(false);
@@ -624,6 +632,7 @@ const SHEETS = {
     <div class="box"><b>Light music library</b><span class="muted" style="font-size:12px">${S.music.length} track(s) in Movies → Stratus Music. Use royalty-free songs only, so posts don't get copyright strikes.</span>
       <div class="row"><button class="btn sm" id="addMusic">Add a song</button></div>
       ${S.music.map(m => `<div class="row"><span style="flex:1">${esc(m)}</span><audio src="/music?f=${encodeURIComponent(m)}" controls preload="none" style="height:30px"></audio></div>`).join("")}</div>
+    <div class="box"><b>☕ Keep my Mac awake</b><span class="muted">${S.settings.stay_awake ? "On: your Mac won't fall asleep while the dashboard runs, so posting and clipping keep going. The screen can still turn off. Closing the lid still puts it to sleep." : "Off: your Mac may sleep when idle, and posting/clipping pause until it wakes."}</span><div class="row"><button class="btn sm ${S.settings.stay_awake ? "" : "go"}" id="awakeBtn2">${S.settings.stay_awake ? "Turn off" : "Turn on"}</button></div></div>
     <div class="box"><b>Posting profile</b><span class="muted">Upload-Post profile: ${esc(S.settings.profile)} (Instagram + YouTube)${S.settings.dry_run ? " · TEST MODE: nothing really posts" : ""}</span></div>
     ${S.past_errors.length ? `<h3>Fixed problems</h3><table>${S.past_errors.map(e => `<tr><td>${esc(e.time.replace("T"," ").slice(0,16))}</td><td>${esc(e.worker)}: ${esc(e.title)}</td></tr>`).join("")}</table>` : ""}`
 };
@@ -1109,6 +1118,8 @@ document.addEventListener("click", async e => {
   }
   if (d.cdel) return api("/api/create-delete", {id: d.cdel});
   if (d.cplay) { const c = (S.creations || []).find(x => x.id === d.cplay); if (c) t.outerHTML = `<div class="thumb"><video src="${c.video_url}" controls autoplay playsinline></video></div>`; return; }
+  if (t.id === "awakeBtn2") return api("/api/stay-awake", {on: !S.settings.stay_awake});
+  if (t.id === "awakeBtn") return api("/api/stay-awake", {on: !S.settings.stay_awake});
   if (t.id === "demoBtn") { if (tab !== "floor") setTab("floor"); return demoStart(); }
   if (demo) {
     if (d.demo === "exit") return demoExit();

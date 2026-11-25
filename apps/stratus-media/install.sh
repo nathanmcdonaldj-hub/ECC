@@ -45,7 +45,7 @@ cat > "$PLIST" <<PLIST
   <key>ThrottleInterval</key><integer>30</integer>
   <key>Nice</key><integer>10</integer>
   <key>LowPriorityIO</key><true/>
-  <key>ProcessType</key><string>Background</string>
+  <key>ProcessType</key><string>Standard</string>
   <key>StandardOutPath</key><string>$HOME/Library/Logs/StratusMedia.log</string>
   <key>StandardErrorPath</key><string>$HOME/Library/Logs/StratusMedia.log</string>
 </dict>

@@ -63,6 +63,7 @@ DEFAULT_CONFIG = {
     "default_model": "claude-opus-5-5",
     "models": ["claude-opus-5-5", "claude-sonnet-5-5"],
     "dry_run_posting": False,
+    "stay_awake": True,   # his ask 2026-11-25: keep the Mac from idle-sleeping so posting/clipping keep running
 }
 
 DATA_DIR = os.environ.get(
@@ -1746,6 +1747,8 @@ def build_state(for_model=False):
             "has_higgsfield_key": bool(hf_key()),
             "profile": CONFIG["upload_post_profile"],
             "dry_run": CONFIG.get("dry_run_posting", False),
+            "stay_awake": bool(CONFIG.get("stay_awake", True)),
+            "awake_active": awake_active(),
         },
         "past_errors": [e for e in STATE["errors"] if e.get("resolved")][:20],
     })
@@ -1913,6 +1916,45 @@ def scout_status():
 def r_trends_refresh(d):
     ok = fetch_trends()
     return {"ok": ok, "message": "Trend brief updated." if ok else "No new brief yet. It comes in around 8 PM."}
+
+
+# ---------------------------------------------------------------- stay awake
+# macOS `caffeinate -i` stops idle system sleep while the dashboard runs. The screen can still
+# turn off. It ends by itself if the dashboard stops (-w). Closing the lid still sleeps a MacBook.
+
+_CAFF = {"proc": None}
+
+
+def awake_active():
+    p = _CAFF["proc"]
+    return bool(p and p.poll() is None)
+
+
+def set_awake(on):
+    if awake_active():
+        _CAFF["proc"].terminate()
+        _CAFF["proc"] = None
+    exe = shutil.which("caffeinate") or ("/usr/bin/caffeinate" if os.path.exists("/usr/bin/caffeinate") else None)
+    if on and exe:
+        try:
+            _CAFF["proc"] = subprocess.Popen([exe, "-i", "-w", str(os.getpid())],
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            sys.stderr.write("[StayAwake] couldn't start caffeinate: {}\n".format(exc))
+    return awake_active()
+
+
+def r_stay_awake(d):
+    on = bool(d.get("on"))
+    CONFIG["stay_awake"] = on
+    cfg = load_json(CONFIG_FILE, {})
+    cfg["stay_awake"] = on
+    save_json(CONFIG_FILE, cfg)
+    active = set_awake(on)
+    if on and not active:
+        return {"ok": False, "message": "Couldn't keep the Mac awake (caffeinate not found)."}
+    return {"ok": True, "message": "Your Mac stays awake now. The screen can still turn off." if on
+            else "Your Mac can sleep again when idle."}
 
 
 # ---------------------------------------------------------------- clipping gate runner
@@ -3673,6 +3715,7 @@ ROUTES = {
     "/api/tiktok-done": r_tiktok_done,
     "/api/tiktok-post-all": r_tiktok_post_all,
     "/api/record-post": r_record_post,
+    "/api/stay-awake": r_stay_awake,
     "/api/reveal": r_reveal,
     "/api/post-now": r_post_now,
     "/api/captions": r_captions,
@@ -3718,6 +3761,7 @@ def main():
     scan_clips()
     resume_creations()
     persist()
+    set_awake(CONFIG.get("stay_awake", True))
     threading.Thread(target=background_loop, daemon=True).start()
     port = int(os.environ.get("STRATUS_PORT") or CONFIG["port"])
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
