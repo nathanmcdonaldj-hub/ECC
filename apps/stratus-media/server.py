@@ -571,6 +571,10 @@ _VS_STARTED_BY_US = [False]
 
 
 def natural_ready():
+    # Disconnected 2026-11-25 at Mr. McDonald's request: the Voice box uses the Mac's free voices only.
+    # Set config "voicestudio": true to connect it again.
+    if not CONFIG.get("voicestudio", False):
+        return False
     return os.path.exists(VS_SCRIPT) and os.path.isdir("/Applications/VoiceStudio.app")
 
 
