@@ -3427,6 +3427,11 @@ def hunt_profile(subject):
     h = hunter()
     prof = h.get("profile") or {}
     if prof.get("subject") == subject:
+        # A profile saved before the Twitch keys existed has no game id: look it up now.
+        if prof.get("is_game") and not prof.get("game_id") and all(twitch_keys()):
+            _twitch_game(prof, subject)
+            with LOCK:
+                persist()
         return prof
     try:
         resp = call_claude({"max_tokens": 300, "system": HUNT_PROFILE_SYSTEM,
@@ -3442,21 +3447,27 @@ def hunt_profile(subject):
             "youtube_query": data.get("youtube_query") or subject,
             "label": data.get("label") or subject, "game_id": None, "game_name": None}
     if prof["is_game"] and all(twitch_keys()):
-        try:
-            for name in [prof["twitch_category"], subject]:
-                if not name:
-                    continue
-                cats = twitch_get("search/categories", {"query": name, "first": 10})
-                pick = next((c for c in cats if c["name"].lower() == name.lower()), cats[0] if cats else None)
-                if pick:
-                    prof["game_id"], prof["game_name"] = pick["id"], pick["name"]
-                    break
-        except RuntimeError:
-            pass
+        _twitch_game(prof, subject)
     with LOCK:
         h["profile"] = prof
         persist()
     return prof
+
+
+def _twitch_game(prof, subject):
+    """Find the Twitch game category for a game subject (exact name first)."""
+    try:
+        for name in [prof.get("twitch_category"), subject]:
+            if not name:
+                continue
+            cats = twitch_get("search/categories", {"query": name, "first": 10})
+            pick = next((c for c in cats if c["name"].lower() == name.lower()), cats[0] if cats else None)
+            if pick:
+                prof["game_id"], prof["game_name"] = pick["id"], pick["name"]
+                return True
+    except RuntimeError:
+        pass
+    return False
 
 
 def _iso_utc(dt):
@@ -3464,15 +3475,25 @@ def _iso_utc(dt):
 
 
 def twitch_candidates(prof):
-    since = _iso_utc(datetime.utcnow() - timedelta(hours=24))
+    """Top clips for the subject. Starts with the last day; if that's thin, looks back 3 then 7 days."""
+    out = []
+    for hours in (24, 72, 168):
+        out = _twitch_clips(prof, hours)
+        if len(out) >= 5:
+            break
+    return out
+
+
+def _twitch_clips(prof, hours):
+    since = _iso_utc(datetime.utcnow() - timedelta(hours=hours))
     clips = []
     if prof.get("game_id"):
-        clips = twitch_get("clips", {"game_id": prof["game_id"], "started_at": since, "first": 40})
+        clips = twitch_get("clips", {"game_id": prof["game_id"], "started_at": since, "first": 100})
     else:
-        chans = twitch_get("search/channels", {"query": prof["twitch_search"], "first": 8})
-        for ch in chans[:5]:
+        chans = twitch_get("search/channels", {"query": prof["twitch_search"], "first": 20})
+        for ch in chans[:8]:
             try:
-                clips += twitch_get("clips", {"broadcaster_id": ch["id"], "started_at": since, "first": 10})
+                clips += twitch_get("clips", {"broadcaster_id": ch["id"], "started_at": since, "first": 20})
             except RuntimeError:
                 continue
     out = []
@@ -3587,7 +3608,7 @@ def run_hunter(manual=False):
                 sent += 1 if ok else 0
                 found.append(c)
             if not cands and not note:
-                note = ("Nothing found on {} for “{}” in the last day. Try YouTube, or a broader subject."
+                note = ("Nothing found on {} for “{}” in the last week. Try YouTube, or a broader subject."
                         .format("Twitch" if plat == "twitch" else "YouTube", subject))
             if cands and not note:
                 note = ("Nothing on Twitch, so I looked on YouTube. " if fell_back else "") + (
