@@ -540,6 +540,7 @@ const SHEETS = {
           <b>${c.source === "UGC" ? "UGC video" : "Clip " + c.num} · <span class="muted">${esc(c.source)}</span></b>
           <label class="f">Caption (hook + call to action)<textarea data-f="caption">${esc(c.caption)}</textarea></label>
           <label class="f">Hashtags<input type="text" data-f="hashtags" value="${esc(c.hashtags)}"></label>
+          ${c.yt_title ? `<div class="muted" style="font-size:12px">YouTube title: <b>${esc(c.yt_title)}</b></div>` : ""}
           <div class="chips">${platformChips(c.platforms, c.id)}</div>
           <label class="f">When<input type="datetime-local" data-f="time" value="${esc(c.time || "")}"></label>
           ${c.why ? `<div class="why">Why this time: ${esc(c.why)}</div>` : ""}

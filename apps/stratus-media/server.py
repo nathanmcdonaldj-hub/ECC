@@ -483,7 +483,7 @@ def clip_public(rec):
     out = {k: rec.get(k) for k in (
         "id", "source", "num", "status", "caption", "hashtags", "platforms",
         "time", "why", "music", "voice_text", "voice", "voice_when", "notes", "posted_at", "results", "missing",
-        "tiktok_done", "redo", "metrics", "metrics_at", "outside")}
+        "tiktok_done", "redo", "metrics", "metrics_at", "outside", "yt_title")}
     out["posting"] = rec["id"] in _POSTING
     out["video_url"] = "/media?f=" + urllib.parse.quote(rec["id"])
     out["thumb_url"] = ("/media?thumb=1&f=" + urllib.parse.quote(rec["id"])) if rec.get("thumb") else None
@@ -841,6 +841,8 @@ def full_caption(rec):
 
 
 def youtube_title(rec):
+    if (rec.get("yt_title") or "").strip():
+        return rec["yt_title"].strip()[:95]
     first = (rec.get("caption") or "").strip().split("\n")[0]
     first = re.sub(r"https?://\S+", "", first).strip()
     return (first or "Stratus House")[:95]
@@ -2464,6 +2466,28 @@ def r_record_post(d):
     return {"ok": True, "id": cid, "message": "Added to Live Posts."}
 
 
+def r_set_caption(d):
+    """Put a ready-made caption on a desk clip (no posting). Marks it "ready" so the Caption Writer
+    won't overwrite it. Optional separate YouTube title."""
+    with LOCK:
+        rec = STATE["clips"].get(d.get("id"))
+        if not rec:
+            return {"ok": False, "message": "Clip not found."}
+        if rec.get("status") not in ("new", "ready"):
+            return {"ok": False, "message": "That clip is already approved or posted."}
+        rec["caption"] = (d.get("caption") or "").strip()
+        rec["hashtags"] = (d.get("hashtags") or "").strip()
+        if "yt_title" in d:
+            rec["yt_title"] = (d.get("yt_title") or "").strip()
+        if not rec.get("platforms"):
+            rec["platforms"] = list(auto_platforms())
+        if not rec.get("time"):
+            rec["time"] = suggest_time(0)
+        rec["status"] = "ready"
+        persist()
+    return {"ok": True, "message": "Caption saved."}
+
+
 def r_post_now(d):
     with LOCK:
         rec = STATE["clips"].get(d.get("id"))
@@ -3717,6 +3741,7 @@ ROUTES = {
     "/api/tiktok-done": r_tiktok_done,
     "/api/tiktok-post-all": r_tiktok_post_all,
     "/api/record-post": r_record_post,
+    "/api/set-caption": r_set_caption,
     "/api/stay-awake": r_stay_awake,
     "/api/reveal": r_reveal,
     "/api/post-now": r_post_now,
