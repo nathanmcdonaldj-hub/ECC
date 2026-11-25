@@ -954,6 +954,7 @@ document.addEventListener("input", e => {
   if (e.target.id === "hSubj") hDraft = Object.assign(hDraft || {}, {subject: e.target.value});
 });
 document.addEventListener("change", async e => {
+  if (e.target.id === "hEvery") { await api("/api/hunter-set", {every: +e.target.value}); return renderHunter(true); }
   if (e.target.id === "hOn") { const b = Object.assign({}, hDraft || {}, {on: e.target.checked}); if ($("#hSubj")) b.subject = $("#hSubj").value; if (b.on && !String(b.subject || "").trim()) { e.target.checked = false; return toast("Type a subject first."); } hDraft = null; await api("/api/hunter-set", b); return renderHunter(true); }
   if (e.target.dataset && e.target.dataset.wtask) { const [dy, i] = e.target.dataset.wtask.split(":"); await api("/api/warmup-check", {day: +dy, i: +i, done: e.target.checked}); return renderWarmup(true); }
   if (e.target.id === "liveSort") { liveSort = e.target.value; renderLive(true); }
@@ -983,7 +984,9 @@ function renderHunter(force) {
   const items = h.items || [];
   v.innerHTML = `<div class="cwrap"><div class="cform">
       <label class="hidesw" style="padding:14px"><input type="checkbox" id="hOn" ${h.on ? "checked" : ""}><span class="knob"></span>
-        <span><b style="font-size:16px">Clip Hunter is ${h.on ? "ON" : "OFF"}</b><small>${h.on ? "Searches every " + h.every + " hours" + (h.next ? " · next " + esc(h.next) : "") : "Turn on to search every 2 hours by itself"}</small></span></label>
+        <span><b style="font-size:16px">Clip Hunter is ${h.on ? "ON" : "OFF"}</b><small>${h.on ? "Searches every " + h.every + (h.every == 1 ? " hour" : " hours") + (h.next ? " · next " + esc(h.next) : "") : "Turn on to search every " + h.every + (h.every == 1 ? " hour" : " hours") + " by itself"}</small></span></label>
+      <div class="row" style="align-items:center;gap:10px;margin:2px 0 4px"><span>⏱ Search automatically every</span>
+        <select id="hEvery" style="width:auto;min-width:120px" aria-label="How often Clip Hunter searches">${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}" ${n == (h.every || 2) ? "selected" : ""}>${n} hour${n === 1 ? "" : "s"}</option>`).join("")}</select></div>
       <h3>1 · Where to look</h3>
       <div class="kinds" style="grid-template-columns:repeat(3,1fr)">${Object.entries(P).map(([k, x]) => `<button class="kind ${plat === k ? "on" : ""}" data-hplat="${k}" ${k === "instagram" ? 'style="opacity:.55"' : ""}><span class="ic">${x[0]}</span><b>${x[1]}</b><span>${x[2]}</span></button>`).join("")}</div>
       ${twSetup}

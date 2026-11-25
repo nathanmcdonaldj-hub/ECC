@@ -3691,6 +3691,12 @@ def r_hunter_set(d):
             h["platform"] = d["platform"]
         if "subject" in d:
             h["subject"] = (d.get("subject") or "").strip()[:80]
+        try:
+            ev = int(d.get("every") or 0)
+        except (TypeError, ValueError):
+            ev = 0
+        if 1 <= ev <= 10:
+            h["every"] = ev
         if d.get("per_run") in (1, 2, 3):
             h["per_run"] = d["per_run"]
         if "on" in d:
