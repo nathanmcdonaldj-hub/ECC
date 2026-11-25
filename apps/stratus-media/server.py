@@ -1072,7 +1072,8 @@ def fetch_post_stats(max_age_days=60):
                 m["url"] = info.get("post_url") or (metrics.get(plat) or {}).get("url")
                 if info.get("post_metrics_error"):
                     m["note"] = str(info["post_metrics_error"])[:120]
-                metrics[plat] = m
+                if plat in (rec.get("platforms") or [plat]):
+                    metrics[plat] = m
             got = True
             time.sleep(1)  # stay far below Upload-Post's 100 requests / 5 minutes
         if not got:
@@ -2452,7 +2453,8 @@ def r_record_post(d):
             "request_ids": [str(x) for x in (d.get("request_ids") or rec.get("request_ids") or []) if x],
             "tiktok_done": True,
         })
-        m = rec.setdefault("metrics", {})
+        m = {k: v for k, v in (rec.get("metrics") or {}).items() if k in plats}
+        rec["metrics"] = m
         for p, u in urls.items():
             if p in plats and str(u).startswith("https://"):
                 m.setdefault(p, {})["url"] = u

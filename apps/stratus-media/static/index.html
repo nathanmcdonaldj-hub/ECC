@@ -825,7 +825,7 @@ function ago(iso) {
 }
 function postTotals(c) {
   const t = {views: null, likes: null, comments: null, shares: null};
-  Object.values(c.metrics || {}).forEach(m => Object.keys(t).forEach(k => { if (typeof m[k] === "number") t[k] = (t[k] || 0) + m[k]; }));
+  Object.entries(c.metrics || {}).filter(([pl]) => !c.platforms || c.platforms.includes(pl)).map(([, m]) => m).forEach(m => Object.keys(t).forEach(k => { if (typeof m[k] === "number") t[k] = (t[k] || 0) + m[k]; }));
   return t;
 }
 function setTab(t) {
