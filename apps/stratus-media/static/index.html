@@ -973,7 +973,7 @@ function renderHunter(force) {
   const per = (hDraft && hDraft.per_run) || h.per_run || 2;
   const P = {youtube: ["▶️", "YouTube", "Popular videos, best moments cut out"], twitch: ["🟣", "Twitch", "Hot clips from live streams"],
     kick: ["🟢", "Kick", "Hot clips from Kick streams"], rumble: ["🟩", "Rumble", "Blocked right now (Rumble's bot check)"],
-    reddit: ["🟠", "Reddit", h.has_reddit ? "Top video posts (by upvotes)" : "Needs its one-time setup (tap to start)"], instagram: ["📸", "Instagram", "Not available (Instagram blocks free search)"]};
+    reddit: ["🟠", "Reddit", h.has_reddit ? "Top video posts (by upvotes)" : "Closed for now (Reddit stopped giving out new keys)"], instagram: ["📸", "Instagram", "Not available (Instagram blocks free search)"]};
   const rules = h.is_game === true ? `<div class="rules game">🎮 <b>Game rules ON</b>${h.game_name ? " · " + esc(h.game_name) : ""}: only game play moments, facecam on top + game below, big captions</div>`
     : h.is_game === false ? `<div class="rules">📺 <b>Regular rules</b>: best moments + big subtitles of what they say</div>` : "";
   const twSetup = plats.includes("twitch") && !h.has_twitch ? `<div class="setup" style="flex-direction:column;align-items:stretch"><b>One-time Twitch setup (5 min)</b>
@@ -989,9 +989,9 @@ function renderHunter(force) {
       <div class="row" style="align-items:center;gap:10px;margin:2px 0 4px"><span>⏱ Search automatically every</span>
         <select id="hEvery" style="width:auto;min-width:120px" aria-label="How often Clip Hunter searches">${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}" ${n == (h.every || 2) ? "selected" : ""}>${n} hour${n === 1 ? "" : "s"}</option>`).join("")}</select></div>
       <h3>1 · Where to look <small class="muted" style="font-weight:400;text-transform:none">(tick as many as you like)</small></h3>
-      <div class="kinds" style="grid-template-columns:repeat(3,1fr)">${Object.entries(P).map(([k, x]) => `<button class="kind ${plats.includes(k) ? "on" : ""}" data-hplat="${k}" ${["instagram", "rumble"].includes(k) ? 'style="opacity:.45" disabled' : (k === "reddit" && !h.has_reddit && !plats.includes("reddit") ? 'style="opacity:.7"' : "")}><span class="ic">${plats.includes(k) ? "✅" : x[0]}</span><b>${x[1]}</b><span>${x[2]}</span></button>`).join("")}</div>
+      <div class="kinds" style="grid-template-columns:repeat(3,1fr)">${Object.entries(P).map(([k, x]) => `<button class="kind ${plats.includes(k) ? "on" : ""}" data-hplat="${k}" ${["instagram", "rumble"].includes(k) || (k === "reddit" && !h.has_reddit) ? 'style="opacity:.45" disabled' : ""}><span class="ic">${plats.includes(k) ? "✅" : x[0]}</span><b>${x[1]}</b><span>${x[2]}</span></button>`).join("")}</div>
       ${twSetup}
-      ${plats.includes("reddit") && !h.has_reddit ? `<div class="setup" style="flex-direction:column;align-items:stretch;border-color:#ff7a1a"><b>🟠 One-time Reddit setup (5 min, free)</b>
+      ${false ? `<div class="setup" style="flex-direction:column;align-items:stretch;border-color:#ff7a1a"><b>🟠 One-time Reddit setup (5 min, free)</b>
       <ol class="steps"><li>Log in to <b>reddit.com</b> (make a free account if you don't have one)</li><li>Open <b>reddit.com/prefs/apps</b> and click <b>create another app…</b> at the bottom</li>
       <li>Name: <b>StratusHouse Hunter</b> · pick <b>script</b> · redirect uri: <b>http://localhost:8080</b></li>
       <li>Click <b>create app</b>. Copy the short code under the app name, and the <b>secret</b></li><li>Paste both below</li></ol>
