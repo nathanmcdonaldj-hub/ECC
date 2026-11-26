@@ -1,0 +1,64 @@
+{
+  "report": 4,
+  "date": "2026-11-25",
+  "generated_at": "2026-11-26T02:58:00Z",
+  "brief_url": "https://claude.ai/artifact/Rgsoo6L6GFFQZJ4FiHALvr",
+  "concerns": [
+    "#1 sound is someone's original audio; may be blocked on business accounts, Instagram and YouTube. Fall back to TikTok only plus a trending Reels sound.",
+    "AI dogs glitch (extra legs, melting paws); every frame of #1 and #2 is checked before approval.",
+    "Multipliers come from 9-13 accounts per format."
+  ],
+  "ideas": [
+    {
+      "rank": 1,
+      "pick": true,
+      "niche": "Funny + Dogs",
+      "title": "\"Everybody's at Thanksgiving except me\"",
+      "length": "8-10 s",
+      "why": "#1 trend on Virlo: 477 creators, +47,600% (Nov 25)",
+      "hook": "In this house everybody gets turkey except me...",
+      "caption": "He had a plan all along. Tag a dog owner. #thanksgiving #dogsoftiktok #funnydog #dogsofinstagram",
+      "sound": "\"In this town everybody goes out partying except me\" (may be blocked outside personal TikTok)",
+      "post_time": "Thu Nov 26, 5-7 PM Phoenix (post-dinner couch scrolling; dead by Saturday)",
+      "build_plan": [
+        "AI visuals: sad golden retriever at a window, blurred dinner party behind, 5 s",
+        "Cut on the beat to the same dog asleep on a carved-up turkey, 3 s",
+        "Text: '...so I made other plans.' No voice; the trend sound carries it"
+      ]
+    },
+    {
+      "rank": 2,
+      "pick": false,
+      "niche": "Dogs",
+      "title": "5 things before your dog turns 2",
+      "length": "15-20 s",
+      "why": "14x usual views, 13 accounts (Volume, Nov 24)",
+      "hook": "5 things to do with your 1-year-old dog before they turn 2.",
+      "caption": "Save this before the birthday. Which one are you missing? #dogtraining #puppytips #dogsoftiktok #dogmom",
+      "sound": "Light happy track from app library (safe everywhere)",
+      "post_time": "Sun Nov 29, 9-11 AM Phoenix (weekend dog-owner saves)",
+      "build_plan": [
+        "AI visuals: 5 shots of a young dog (new trail, calm dog meet, car ride, learning 'wait', vet visit), 3 s each",
+        "AI voice: warm read of each item",
+        "Text: big number + one line per shot"
+      ]
+    },
+    {
+      "rank": 3,
+      "pick": false,
+      "niche": "Business",
+      "title": "Black Friday discount script",
+      "length": "12-15 s",
+      "why": "20x usual views, 9 accounts (Volume, Nov 24)",
+      "hook": "When a customer asks for a Black Friday discount, say this exact sentence.",
+      "caption": "Protect your price. Save this for tomorrow. #blackfriday #smallbusiness #salestips #entrepreneur",
+      "sound": "AI voice + quiet beat from app library (business-safe)",
+      "post_time": "Thu Nov 26, 7-9 PM Phoenix (owners prepping the night before Black Friday)",
+      "build_plan": [
+        "AI visuals: small shop counter or phone with customer message, 4 s",
+        "AI voice reads: 'This is already our best value. What I can do is add [bonus] if you order today.'",
+        "Text: the script in large type, end on 'Save this for tomorrow.'"
+      ]
+    }
+  ]
+}
