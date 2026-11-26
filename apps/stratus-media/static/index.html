@@ -1003,7 +1003,7 @@ function renderHunter(force) {
     </div>
     <div class="cards"><h3 style="margin:0">What it found</h3>
       ${items.length ? items.map(i => `<div class="hitem" style="position:relative"><button class="hx" data-hdel="${esc(i.key)}" aria-label="Remove" title="Remove">✕</button>${i.thumb ? `<img src="${esc(i.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<img alt="">`}
-        <div><b>${esc(i.title || "(no title)")}</b><span class="meta">${esc(i.creator)} · ${i.platform === "twitch" ? "Twitch" : "YouTube"} · ${fmtN(i.views)} views</span><br>
+        <div><b>${esc(i.title || "(no title)")}</b><span class="meta">${esc(i.creator)} · ${i.platform === "twitch" ? "Twitch" : "YouTube"} · ${fmtN(i.views)} views${i.followers ? " · " + fmtN(i.followers) + (i.platform === "twitch" ? " followers" : " subscribers") : ""}</span><br>
         <span class="hbadge ${i.state}">${i.state === "sent" ? "✅ " : "⏭ "}${esc(i.why || "")}</span></div></div>`).join("")
         : `<div class="empty"><b style="color:var(--ink)">Nothing found yet</b><br>Pick a place, type a subject, then press Search now.</div>`}
       ${(h.lessons || []).length ? `<div class="box"><b>📒 What's working (from your posts)</b><ul class="steps">${h.lessons.map(l => `<li>${esc(l)}</li>`).join("")}</ul></div>`

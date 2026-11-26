@@ -3344,7 +3344,13 @@ def r_warmup_stop(d):
 
 HUNT_MAX_ITEMS = 80
 HUNT_INBOX_CAP = 4          # don't pile more than this many hunter links in the inbox at once
-_HUNT = {"running": False, "token": None, "token_exp": 0.0}
+_HUNT = {"running": False, "token": None, "token_exp": 0.0, "fans": {}}
+# Only big videos from big accounts (Mr. McDonald, 2026-11-26). Anything below is skipped.
+HUNT_MIN = {
+    "youtube": {"views": 100000, "followers": 100000},   # video views, channel subscribers
+    "twitch": {"views": 1000, "followers": 50000},       # clip views, channel followers
+}
+HUNT_MIN_NO_FANS = {"youtube": 500000, "twitch": 10000}  # when the follower count can't be read
 
 HUNT_PROFILE_SYSTEM = (
     "You help a short-video clipping tool. Given a subject he typed, reply with JSON only: "
@@ -3494,7 +3500,7 @@ def _twitch_clips(prof, hours):
         clips = twitch_get("clips", {"game_id": prof["game_id"], "started_at": since, "first": 100})
     else:
         chans = twitch_get("search/channels", {"query": prof["twitch_search"], "first": 20})
-        for ch in chans[:8]:
+        for ch in chans[:12]:
             try:
                 clips += twitch_get("clips", {"broadcaster_id": ch["id"], "started_at": since, "first": 20})
             except RuntimeError:
@@ -3516,9 +3522,14 @@ def _twitch_clips(prof, hours):
 
 def youtube_candidates(prof):
     # YouTube's own filter: uploaded this week, sorted by view count (sp=CAMSAggD).
-    url = "https://www.youtube.com/results?search_query={}&sp=CAMSAggD".format(urllib.parse.quote_plus(prof["youtube_query"]))
-    data = ytdlp_json(["--playlist-end", "40", url])
-    entries = [e for e in (data.get("entries") or []) if e]
+    # If this week has nothing big enough, look at this month (sp=CAMSAggE), still sorted by views.
+    entries = []
+    for sp in ("CAMSAggD", "CAMSAggE"):
+        url = "https://www.youtube.com/results?search_query={}&sp={}".format(urllib.parse.quote_plus(prof["youtube_query"]), sp)
+        data = ytdlp_json(["--playlist-end", "40", url])
+        entries = [e for e in (data.get("entries") or []) if e]
+        if sum(1 for e in entries if int(e.get("view_count") or 0) >= HUNT_MIN["youtube"]["views"]) >= 3:
+            break
     if not entries:   # fall back to plain search ranking
         data = ytdlp_json(["--playlist-end", "40", "ytsearch40:" + prof["youtube_query"]])
         entries = [e for e in (data.get("entries") or []) if e]
@@ -3535,6 +3546,55 @@ def youtube_candidates(prof):
                     "made": None, "platform": "youtube", "length": dur})
     out.sort(key=lambda x: -x["views"])
     return out
+
+
+def _fans_cached(key, fetch):
+    hit = _HUNT["fans"].get(key)
+    if hit and time.time() - hit[1] < 24 * 3600:
+        return hit[0]
+    try:
+        n = fetch()
+    except Exception:  # noqa: BLE001 - unknown is fine, the views rule still applies
+        n = None
+    _HUNT["fans"][key] = (n, time.time())
+    return n
+
+
+def twitch_followers(name):
+    def fetch():
+        users = twitch_get("users", {"login": name.lower()})
+        if not users:
+            return None
+        url = "https://api.twitch.tv/helix/channels/followers?" + urllib.parse.urlencode({"broadcaster_id": users[0]["id"], "first": 1})
+        cid, _ = twitch_keys()
+        req = urllib.request.Request(url, headers={"Client-Id": cid, "Authorization": "Bearer " + _HUNT["token"]})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            tot = json.loads(r.read().decode()).get("total")
+        return int(tot) if tot is not None else None
+    return _fans_cached("tw:" + name.lower(), fetch)
+
+
+def youtube_subscribers(channel_url):
+    def fetch():
+        data = ytdlp_json(["--playlist-end", "1", channel_url.rstrip("/") + "/videos"], timeout=60)
+        n = data.get("channel_follower_count")
+        return int(n) if n is not None else None
+    return _fans_cached("yt:" + channel_url, fetch) if channel_url else None
+
+
+def big_enough(c):
+    """Fill in the account's follower count and say whether the video clears the size bar."""
+    rule = HUNT_MIN.get(c["platform"], HUNT_MIN["youtube"])
+    if c["views"] < rule["views"]:
+        return False, "Too few views ({})".format(c["views"])
+    fans = twitch_followers(c["creator"]) if c["platform"] == "twitch" else youtube_subscribers(c.get("creator_url"))
+    c["followers"] = fans
+    if fans is None:
+        need = HUNT_MIN_NO_FANS.get(c["platform"], 500000)
+        return (c["views"] >= need), "Account size unknown"
+    if fans < rule["followers"]:
+        return False, "Account too small ({})".format(fans)
+    return True, ""
 
 
 def already_reposted(item):
@@ -3596,10 +3656,19 @@ def run_hunter(manual=False):
                 except RuntimeError:
                     pass
             fresh = [c for c in cands if c["key"] not in h["seen"]]
+            fresh.sort(key=lambda x: -x["views"])
             found = []
-            for c in fresh[:12]:
+            too_small = 0
+            for c in fresh[:25]:
                 if sent >= int(h.get("per_run") or 2):
                     break
+                if c["views"] < HUNT_MIN.get(c["platform"], HUNT_MIN["youtube"])["views"]:
+                    too_small += 1
+                    continue   # list is sorted by views, but keep counting what we skip
+                ok_size, why = big_enough(c)
+                if not ok_size:
+                    too_small += 1
+                    continue
                 c["found_at"] = now_iso()
                 h["seen"][c["key"]] = now_iso()
                 if c["platform"] == "twitch" and already_reposted(c):
@@ -3615,7 +3684,9 @@ def run_hunter(manual=False):
                         .format("Twitch" if plat == "twitch" else "YouTube", subject))
             if cands and not note:
                 note = ("Nothing on Twitch, so I looked on YouTube. " if fell_back else "") + (
-                    "Found {} new, sent {} to the clipper.".format(len(fresh), sent) if fresh else "Nothing new since last time.")
+                    "Sent {} big video(s) to the clipper.".format(sent) if sent else
+                    "Nothing big enough right now (skipped {} small ones). I'll look again next time.".format(too_small)
+                    if fresh else "Nothing new since last time.")
             with LOCK:
                 h["items"] = (found + h["items"])[:HUNT_MAX_ITEMS]
                 # keep the seen list from growing forever
