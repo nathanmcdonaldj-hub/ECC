@@ -3523,16 +3523,27 @@ def _twitch_clips(prof, hours):
 def youtube_candidates(prof):
     # YouTube's own filter: uploaded this week, sorted by view count (sp=CAMSAggD).
     # If this week has nothing big enough, look at this month (sp=CAMSAggE), still sorted by views.
+    # The words he typed are tried too, because a long made-up search can come back empty.
     entries = []
-    for sp in ("CAMSAggD", "CAMSAggE"):
-        url = "https://www.youtube.com/results?search_query={}&sp={}".format(urllib.parse.quote_plus(prof["youtube_query"]), sp)
-        data = ytdlp_json(["--playlist-end", "40", url])
-        entries = [e for e in (data.get("entries") or []) if e]
-        if sum(1 for e in entries if int(e.get("view_count") or 0) >= HUNT_MIN["youtube"]["views"]) >= 3:
+    queries = [q for q in dict.fromkeys([prof["youtube_query"], prof.get("subject") or ""]) if q.strip()]
+    big = HUNT_MIN["youtube"]["views"]
+    for q in queries:
+        for sp in ("CAMSAggD", "CAMSAggE"):
+            url = "https://www.youtube.com/results?search_query={}&sp={}".format(urllib.parse.quote_plus(q), sp)
+            data = ytdlp_json(["--playlist-end", "40", url])
+            got = [e for e in (data.get("entries") or []) if e]
+            seen_ids = {e.get("id") for e in entries}
+            entries += [e for e in got if e.get("id") not in seen_ids]
+            if sum(1 for e in entries if int(e.get("view_count") or 0) >= big) >= 3:
+                break
+        if sum(1 for e in entries if int(e.get("view_count") or 0) >= big) >= 3:
             break
     if not entries:   # fall back to plain search ranking
-        data = ytdlp_json(["--playlist-end", "40", "ytsearch40:" + prof["youtube_query"]])
-        entries = [e for e in (data.get("entries") or []) if e]
+        for q in queries:
+            data = ytdlp_json(["--playlist-end", "40", "ytsearch40:" + q])
+            entries = [e for e in (data.get("entries") or []) if e]
+            if entries:
+                break
     out = []
     for e in entries:
         dur = e.get("duration") or 0
@@ -3593,6 +3604,9 @@ def big_enough(c):
         need = HUNT_MIN_NO_FANS.get(c["platform"], 500000)
         return (c["views"] >= need), "Account size unknown"
     if fans < rule["followers"]:
+        # A huge video still counts: YouTube sometimes reports a wrong, tiny subscriber number.
+        if c["views"] >= HUNT_MIN_NO_FANS.get(c["platform"], 500000):
+            return True, ""
         return False, "Account too small ({})".format(fans)
     return True, ""
 
