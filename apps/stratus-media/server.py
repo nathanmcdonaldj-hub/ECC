@@ -3199,7 +3199,11 @@ WARMUP_SYSTEM = (
     "He does every step BY HAND on his phone: no bots, no automation, no follow-for-follow, no copy-paste spam. "
     "Each day must take about 10 minutes. Keep it safe for the apps: at most 10 follows and 10 comments a day, "
     "real comments that add something, no links in comments. Plain words, short lines, no jargon. "
+    "His niches are business, success, fitness, anti-aging, dogs, funny, and gaming clips (e.g. GTA 6). "
+    "If the niche he typed looks misspelled or unclear (e.g. 'eta 6' almost surely means 'GTA 6'), use the closest "
+    "sensible topic for a faceless clip page, never an obscure product. "
     "Reply with JSON only, no other text: {"
+    "\"niche\": the niche name you planned for, cleaned up (e.g. 'GTA 6 clips'), "
     "\"hashtags\": 8 hashtags to search for this niche (strings with #), "
     "\"accounts\": 5 short descriptions of the kinds of accounts to follow (e.g. 'small dog trainers posting daily'), "
     "\"comments\": 8 short, genuine comment ideas he can adapt (no emojis spam, no 'follow me'), "
@@ -3281,7 +3285,8 @@ def r_warmup_start(d):
         return {"ok": False, "message": "Your manager couldn't write the plan. See the alert at the top."}
     except (ValueError, KeyError, TypeError, AttributeError):
         return {"ok": False, "message": "The plan came back garbled. Press Start again."}
-    w = {"niche": niche, "platforms": plats, "started": now().strftime("%Y-%m-%d"), "status": "on",
+    fixed = str(plan.get("niche") or "").strip()[:120]
+    w = {"niche": fixed or niche, "typed": niche, "platforms": plats, "started": now().strftime("%Y-%m-%d"), "status": "on",
          "hashtags": [str(x).strip()[:60] for x in (plan.get("hashtags") or [])][:10],
          "accounts": [str(x).strip()[:160] for x in (plan.get("accounts") or [])][:6],
          "comments": [str(x).strip()[:200] for x in (plan.get("comments") or [])][:10],
@@ -3292,7 +3297,10 @@ def r_warmup_start(d):
             STATE.setdefault("warmup_history", []).append(_warmup_summary(old))
         STATE["warmup"] = w
         persist()
-    return {"ok": True, "message": "Day 1 is ready. About 10 minutes."}
+    msg = "Day 1 is ready. About 10 minutes."
+    if fixed and fixed.lower() != niche.lower():
+        msg = "I read “{}” as “{}”. Day 1 is ready. Not right? Press Finish and type it again.".format(niche, fixed)
+    return {"ok": True, "message": msg}
 
 
 def _warmup_summary(w):
@@ -3360,7 +3368,15 @@ def r_warmup_restore(d):
     """Bring back the warm-up that was replaced or finished most recently, with its check marks."""
     with LOCK:
         hist = STATE.get("warmup_history") or []
-        idx = next((i for i in range(len(hist) - 1, -1, -1) if hist[i].get("full")), None)
+        idx = None
+        if d.get("i") is not None:   # the Past warm-ups list shows newest first
+            try:
+                j = len(hist) - 1 - int(d["i"])
+                idx = j if 0 <= j < len(hist) and hist[j].get("full") else None
+            except (TypeError, ValueError):
+                idx = None
+        else:
+            idx = next((i for i in range(len(hist) - 1, -1, -1) if hist[i].get("full")), None)
         if idx is None:
             return {"ok": False, "message": "There's no earlier warm-up to bring back."}
         old = hist.pop(idx)["full"]

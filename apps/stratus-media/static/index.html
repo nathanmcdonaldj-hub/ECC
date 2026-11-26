@@ -1027,7 +1027,7 @@ function renderWarmup(force) {
       <button class="btn go" id="wStart" style="padding:12px">🔥 Start warm-up</button>
       ${hist.some(x => x.can_restore) ? `<button class="btn sm" id="wRestore">↩ Bring back my last warm-up (${esc(hist.find(x => x.can_restore).niche)})</button>` : ""}
       <span class="muted" style="font-size:12px">Your manager writes 14 days of short to-dos for this niche: what to search, who to follow, what to comment.</span>
-    </div><div class="cards"><h3 style="margin:0">Past warm-ups</h3>${hist.length ? hist.map(x => `<div class="box"><b>${esc(x.niche)}</b><span class="muted" style="font-size:12px">${esc(x.started)} → ${esc(x.ended)} · ${x.days_done} of 14 days done</span></div>`).join("") : `<div class="empty">None yet.</div>`}</div></div>`;
+    </div><div class="cards"><h3 style="margin:0">Past warm-ups</h3>${hist.length ? hist.map((x, i) => `<div class="box"><b>${esc(x.niche)}</b><span class="muted" style="font-size:12px">${esc(x.started)} → ${esc(x.ended)} · ${x.days_done} of 14 days done</span>${x.can_restore ? `<div class="row"><button class="btn sm" data-wrestore="${i}">↩ Bring this one back</button></div>` : ""}</div>`).join("") : `<div class="empty">None yet.</div>`}</div></div>`;
     return;
   }
   const day = wSel || w.day;
@@ -1105,6 +1105,7 @@ document.addEventListener("click", async e => {
   if (d.wcopy) { await copyText(d.wcopy); return toast("Copied"); }
   if (t.id === "wLogSave") { for (const i of document.querySelectorAll("[data-wlog]")) if (i.value.trim()) await api("/api/warmup-log", {platform: i.dataset.wlog, followers: i.value}); return renderWarmup(true); }
   if (t.id === "wRestart") { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to start over"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-restart"); wSel = null; return renderWarmup(true); }
+  if (d.wrestore !== undefined) { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to bring it back"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-restore", {i: +d.wrestore}); wSel = null; return renderWarmup(true); }
   if (t.id === "wRestore") { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to bring it back"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-restore"); wSel = null; return renderWarmup(true); }
   if (t.id === "wStop") { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to finish"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-stop"); wSel = null; return renderWarmup(true); }
   if (d.ckind && !demo) { const ask = $("#cAsk").value; cKind = d.ckind; $("#cForm").innerHTML = createForm(); $("#cAsk").value = ask; return; }
