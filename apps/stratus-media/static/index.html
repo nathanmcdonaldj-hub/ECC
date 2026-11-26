@@ -972,8 +972,8 @@ function renderHunter(force) {
   const subj = hDraft && hDraft.subject != null ? hDraft.subject : (h.subject || "");
   const per = (hDraft && hDraft.per_run) || h.per_run || 2;
   const P = {youtube: ["▶️", "YouTube", "Popular videos, best moments cut out"], twitch: ["🟣", "Twitch", "Hot clips from live streams"],
-    kick: ["🟢", "Kick", "Hot clips from Kick streams"], rumble: ["🟩", "Rumble", "Popular Rumble videos"],
-    reddit: ["🟠", "Reddit", "Top video posts (by upvotes)"], instagram: ["📸", "Instagram", "Not available (Instagram blocks free search)"]};
+    kick: ["🟢", "Kick", "Hot clips from Kick streams"], rumble: ["🟩", "Rumble", "Blocked right now (Rumble's bot check)"],
+    reddit: ["🟠", "Reddit", "Blocked right now (Reddit wants a login)"], instagram: ["📸", "Instagram", "Not available (Instagram blocks free search)"]};
   const rules = h.is_game === true ? `<div class="rules game">🎮 <b>Game rules ON</b>${h.game_name ? " · " + esc(h.game_name) : ""}: only game play moments, facecam on top + game below, big captions</div>`
     : h.is_game === false ? `<div class="rules">📺 <b>Regular rules</b>: best moments + big subtitles of what they say</div>` : "";
   const twSetup = plats.includes("twitch") && !h.has_twitch ? `<div class="setup" style="flex-direction:column;align-items:stretch"><b>One-time Twitch setup (5 min)</b>
@@ -989,7 +989,7 @@ function renderHunter(force) {
       <div class="row" style="align-items:center;gap:10px;margin:2px 0 4px"><span>⏱ Search automatically every</span>
         <select id="hEvery" style="width:auto;min-width:120px" aria-label="How often Clip Hunter searches">${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}" ${n == (h.every || 2) ? "selected" : ""}>${n} hour${n === 1 ? "" : "s"}</option>`).join("")}</select></div>
       <h3>1 · Where to look <small class="muted" style="font-weight:400;text-transform:none">(tick as many as you like)</small></h3>
-      <div class="kinds" style="grid-template-columns:repeat(3,1fr)">${Object.entries(P).map(([k, x]) => `<button class="kind ${plats.includes(k) ? "on" : ""}" data-hplat="${k}" ${k === "instagram" ? 'style="opacity:.45" disabled' : ""}><span class="ic">${plats.includes(k) ? "✅" : x[0]}</span><b>${x[1]}</b><span>${x[2]}</span></button>`).join("")}</div>
+      <div class="kinds" style="grid-template-columns:repeat(3,1fr)">${Object.entries(P).map(([k, x]) => `<button class="kind ${plats.includes(k) ? "on" : ""}" data-hplat="${k}" ${["instagram", "rumble", "reddit"].includes(k) ? 'style="opacity:.45" disabled' : ""}><span class="ic">${plats.includes(k) ? "✅" : x[0]}</span><b>${x[1]}</b><span>${x[2]}</span></button>`).join("")}</div>
       ${twSetup}
       <h3>2 · What subject?</h3>
       <input type="text" id="hSubj" value="${esc(subj)}" placeholder="e.g. GTA 6, dog training, money podcast">
@@ -1090,7 +1090,7 @@ document.addEventListener("click", async e => {
   }
   if (t.id === "liveRefresh") return api("/api/live-refresh");
   if (d.hplat) {
-    if (d.hplat === "instagram") return toast("Instagram doesn't allow free searching yet.");
+    if (["instagram", "rumble", "reddit"].includes(d.hplat)) return toast("That one blocks free searching right now.");
     const cur = (hDraft && hDraft.platforms) || (S.hunter.platforms || []).slice();
     const next = cur.includes(d.hplat) ? cur.filter(x => x !== d.hplat) : cur.concat(d.hplat);
     hDraft = Object.assign(hDraft || {}, {platforms: next, subject: $("#hSubj").value}); return renderHunter(true);

@@ -3429,6 +3429,9 @@ HUNT_MIN = {
 }
 HUNT_MIN_NO_FANS = {"youtube": 500000, "twitch": 10000, "kick": 10000, "rumble": 100000, "reddit": 10000}
 HUNT_SOURCES = ("youtube", "twitch", "kick", "rumble", "reddit")   # Instagram blocks free search
+# Tested from his Mac 2026-11-26: Reddit wants a login (403 "network policy") and Rumble shows a Cloudflare
+# bot check, so both stay greyed out until a free way in exists. Their finders are kept for later.
+HUNT_BLOCKED = ("rumble", "reddit")
 HUNT_NAMES = {"youtube": "YouTube", "twitch": "Twitch", "kick": "Kick", "rumble": "Rumble", "reddit": "Reddit"}
 WEB_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
@@ -3613,6 +3616,25 @@ def _twitch_clips(prof, hours):
     return out
 
 
+HUNT_FILLER = {"funny", "moments", "moment", "best", "top", "new", "viral", "clips", "clip", "videos", "video", "the",
+               "and", "with", "for", "compilation", "highlights", "fails", "epic", "crazy", "most", "this", "week"}
+
+
+def on_topic(title, prof):
+    """Non-game subjects: the title must name the subject's main word(s) ("funny dog moments" needs 'dog')."""
+    if prof.get("is_game"):
+        return True
+    keys = [w for w in re.findall(r"[a-z0-9]+", (prof.get("subject") or "").lower()) if len(w) >= 3 and w not in HUNT_FILLER]
+    if not keys:
+        return True
+    t = (title or "").lower()
+    alias = {"dog": ("puppy", "puppies", "pup", "doggo", "k9"), "dogs": ("puppy", "puppies", "pup", "doggo", "k9"),
+             "cat": ("kitten", "kitty"), "cats": ("kitten", "kitty")}
+    if any(a in t for k in keys for a in alias.get(k, ())):
+        return True
+    return any(k in t or (k.endswith("s") and k[:-1] in t) or (k + "s") in t or (k + "gy") in t for k in keys)
+
+
 def youtube_candidates(prof):
     # YouTube's own filter: uploaded this week, sorted by view count (sp=CAMSAggD).
     # If this week has nothing big enough, look at this month (sp=CAMSAggE), still sorted by views.
@@ -3642,6 +3664,8 @@ def youtube_candidates(prof):
         dur = e.get("duration") or 0
         if not e.get("id") or (dur and (dur < 120 or dur > 90 * 60)):
             continue   # skip Shorts and very long streams (too heavy for this Mac)
+        if not on_topic(e.get("title"), prof):
+            continue   # e.g. GTA 6 "funny moments" showing up for "funny dog moments"
         thumbs = e.get("thumbnails") or []
         out.append({"key": "yt:" + e["id"], "url": "https://www.youtube.com/watch?v=" + e["id"],
                     "title": e.get("title") or "", "creator": e.get("channel") or e.get("uploader") or "",
@@ -3789,26 +3813,58 @@ def _kick_clips(path):
     return clips or []
 
 
+def _kick_search(words):
+    try:
+        found = web_get("https://kick.com/api/search?" + urllib.parse.urlencode({"searched_word": words}))
+    except RuntimeError:
+        return [], []
+    if not isinstance(found, dict):
+        return [], []
+    return found.get("categories") or [], found.get("channels") or []
+
+
+def _kick_pick_category(cats, want):
+    """Prefer the category whose name matches the Twitch game name (GTA 6 -> 'Grand Theft Auto VI (GTA)')."""
+    def norm(x):
+        return re.sub(r"\s*\(.*?\)", "", (x or "")).strip().lower()
+    if want:
+        for c in cats:
+            if norm(c.get("name")) == norm(want):
+                return c
+    return cats[0] if cats else None
+
+
 def kick_candidates(prof):
+    # Kick's search only matches whole words: "GTA 6" finds nothing, "Grand Theft Auto VI" does.
     words = prof.get("subject") or prof["twitch_search"]
-    found = web_get("https://kick.com/api/search?" + urllib.parse.urlencode({"searched_word": words}))
+    cats, chans = [], []
+    for w in dict.fromkeys(t for t in (words, prof.get("game_name"), prof.get("twitch_search")) if t):
+        c1, c2 = _kick_search(w)
+        cats, chans = cats or c1, chans or c2
+        if cats and chans:
+            break
     clips = []
-    cats = (found.get("categories") or []) if isinstance(found, dict) else []
-    chans = (found.get("channels") or []) if isinstance(found, dict) else []
     if prof.get("is_game") and cats:
-        slug = cats[0].get("slug")
+        slug = _kick_pick_category(cats, prof.get("game_name")).get("slug")
         for when in ("week", "month"):
             try:
-                clips = _kick_clips("categories/{}/clips?sort=view&time={}".format(slug, when))
+                got = _kick_clips("categories/{}/clips?sort=view&time={}".format(slug, when))
             except RuntimeError:
-                clips = []
+                got = []
+            # the category list also mixes in clips filed under other categories (e.g. Just Chatting)
+            clips = [c for c in got if ((c.get("category") or {}).get("slug") or slug) == slug]
             if len(clips) >= 5:
                 break
-    for ch in chans[:8]:
-        try:
-            clips += _kick_clips("channels/{}/clips?sort=view&time=week".format(ch.get("slug")))
-        except RuntimeError:
-            continue
+    if not prof.get("is_game"):
+        # Kick's channel search matches names, not topics ("dog" finds a streamer called atadogann),
+        # so for a non-game subject only an exact streamer name counts (e.g. the subject "xQc").
+        want = re.sub(r"[^a-z0-9_]", "", words.lower())
+        chans = [ch for ch in chans if (ch.get("slug") or "").replace("-", "_").lower() == want.replace("-", "_")]
+        for ch in chans[:8]:
+            try:
+                clips += _kick_clips("channels/{}/clips?sort=view&time=week".format(ch.get("slug")))
+            except RuntimeError:
+                continue
     out, seen = [], set()
     for c in clips:
         cid = str(c.get("id") or "")
@@ -3872,8 +3928,8 @@ def rumble_candidates(prof):
 
 
 def hunt_platforms(h):
-    pl = [p for p in (h.get("platforms") or []) if p in HUNT_SOURCES]
-    if not pl and h.get("platform") in HUNT_SOURCES:
+    pl = [p for p in (h.get("platforms") or []) if p in HUNT_SOURCES and p not in HUNT_BLOCKED]
+    if not pl and not h.get("platforms") and h.get("platform") in HUNT_SOURCES:
         pl = [h["platform"]]
     return pl
 
@@ -3977,6 +4033,8 @@ def run_hunter(manual=False):
                     parts.append(notes[plat][0].upper() + notes[plat][1:])
                 elif too_small.get(plat):
                     parts.append("{}: nothing big enough ({} small skipped)".format(HUNT_NAMES[plat], too_small[plat]))
+                elif sent >= int(h.get("per_run") or 2):
+                    parts.append("{}: not needed this time".format(HUNT_NAMES[plat]))
                 else:
                     parts.append("{}: nothing new".format(HUNT_NAMES[plat]))
             note = ("Sent {} big video(s) to the clipper. ".format(sent) if sent else "Nothing big enough this time. ") + " · ".join(parts)
