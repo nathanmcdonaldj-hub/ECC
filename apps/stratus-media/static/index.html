@@ -1025,9 +1025,9 @@ function renderWarmup(force) {
       <label class="f">New niche<input type="text" id="wNiche" placeholder="e.g. GTA 6 clips, dog training, anti-aging"></label>
       <div class="chips">${["instagram", "tiktok", "youtube"].map(p => `<button class="chip ${p !== "youtube" ? "on" : ""}" data-wplat="${p}">${PLAT[p] || p}</button>`).join("")}</div>
       <button class="btn go" id="wStart" style="padding:12px">🔥 Start warm-up</button>
-      ${hist.some(x => x.can_restore) ? `<button class="btn sm" id="wRestore">↩ Bring back my last warm-up (${esc(hist.find(x => x.can_restore).niche)})</button>` : ""}
+      ${hist.some(x => x.can_restore) ? `<div class="row"><button class="btn sm" id="wRestore">↩ Bring back my last warm-up (${esc(hist.find(x => x.can_restore).niche)})</button><button class="btn bad sm" data-wdel="${hist.findIndex(x => x.can_restore)}" title="Remove">✕</button></div>` : ""}
       <span class="muted" style="font-size:12px">Your manager writes 14 days of short to-dos for this niche: what to search, who to follow, what to comment.</span>
-    </div><div class="cards"><h3 style="margin:0">Past warm-ups</h3>${hist.length ? hist.map((x, i) => `<div class="box"><b>${esc(x.niche)}</b><span class="muted" style="font-size:12px">${esc(x.started)} → ${esc(x.ended)} · ${x.days_done} of 14 days done</span>${x.can_restore ? `<div class="row"><button class="btn sm" data-wrestore="${i}">↩ Bring this one back</button></div>` : ""}</div>`).join("") : `<div class="empty">None yet.</div>`}</div></div>`;
+    </div><div class="cards"><h3 style="margin:0">Past warm-ups</h3>${hist.length ? hist.map((x, i) => `<div class="box"><b>${esc(x.niche)}</b><span class="muted" style="font-size:12px">${esc(x.started)} → ${esc(x.ended)} · ${x.days_done} of 14 days done</span><div class="row">${x.can_restore ? `<button class="btn sm" data-wrestore="${i}">↩ Bring this one back</button>` : ""}<button class="btn bad sm" data-wdel="${i}" title="Remove">✕</button></div></div>`).join("") : `<div class="empty">None yet.</div>`}</div></div>`;
     return;
   }
   const day = wSel || w.day;
@@ -1049,7 +1049,7 @@ function renderWarmup(force) {
       ${d.tasks.map((t, i) => `<label class="wtask ${t.done ? "done" : ""}"><input type="checkbox" data-wtask="${day}:${i}" ${t.done ? "checked" : ""}><span>${esc(t.t)}</span><small>${t.m} min</small></label>`).join("")}
       ${d.done === d.tasks.length ? `<div class="rules game">✅ Day ${day} done. Nice work.</div>` : ""}
       <div class="row"><button class="btn sm" id="wRestart">↺ Start over</button>
-        ${(S.warmup_history || []).some(x => x.can_restore) ? `<button class="btn sm" id="wRestore">↩ Bring back my last warm-up${(() => { const x = (S.warmup_history || []).find(y => y.can_restore); return x ? " (" + esc(x.niche) + ")" : ""; })()}</button>` : ""}
+        ${(S.warmup_history || []).some(x => x.can_restore) ? `<button class="btn sm" id="wRestore">↩ Bring back my last warm-up${(() => { const x = (S.warmup_history || []).find(y => y.can_restore); return x ? " (" + esc(x.niche) + ")" : ""; })()}</button><button class="btn bad sm" data-wdel="${(S.warmup_history || []).findIndex(y => y.can_restore)}" title="Remove">✕</button>` : ""}
         <button class="btn bad sm" id="wStop">Finish warm-up</button></div>
     </div><div class="cards">
       <div class="box"><b>#️⃣ Hashtags to search</b><span class="muted" style="font-size:12px">Tap one to copy it</span><div class="chips">${(w.hashtags || []).map(x => `<button class="chip" data-wcopy="${esc(x)}">${esc(x)}</button>`).join("")}</div></div>
@@ -1105,6 +1105,7 @@ document.addEventListener("click", async e => {
   if (d.wcopy) { await copyText(d.wcopy); return toast("Copied"); }
   if (t.id === "wLogSave") { for (const i of document.querySelectorAll("[data-wlog]")) if (i.value.trim()) await api("/api/warmup-log", {platform: i.dataset.wlog, followers: i.value}); return renderWarmup(true); }
   if (t.id === "wRestart") { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to start over"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-restart"); wSel = null; return renderWarmup(true); }
+  if (d.wdel !== undefined) { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to remove"; setTimeout(() => { confirmBox = false; t.textContent = "✕"; }, 4000); return; } confirmBox = false; await api("/api/warmup-delete", {i: +d.wdel}); return renderWarmup(true); }
   if (d.wrestore !== undefined) { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to bring it back"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-restore", {i: +d.wrestore}); wSel = null; return renderWarmup(true); }
   if (t.id === "wRestore") { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to bring it back"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-restore"); wSel = null; return renderWarmup(true); }
   if (t.id === "wStop") { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to finish"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-stop"); wSel = null; return renderWarmup(true); }

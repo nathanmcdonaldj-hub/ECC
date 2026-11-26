@@ -3384,6 +3384,22 @@ def r_warmup_restore(d):
     return {"ok": True, "message": "Brought back “{}”.".format(old.get("niche"))}
 
 
+def r_warmup_delete(d):
+    """✕ on a past warm-up: remove it. i counts newest first, like the Past warm-ups list."""
+    with LOCK:
+        hist = STATE.get("warmup_history") or []
+        try:
+            j = len(hist) - 1 - int(d.get("i"))
+        except (TypeError, ValueError):
+            return {"ok": False}
+        if not 0 <= j < len(hist):
+            return {"ok": False}
+        gone = hist.pop(j)
+        STATE["warmup_history"] = hist
+        persist()
+    return {"ok": True, "message": "Removed “{}”.".format(gone.get("niche"))}
+
+
 def r_warmup_stop(d):
     with LOCK:
         w = STATE.get("warmup")
@@ -3950,6 +3966,7 @@ ROUTES = {
     "/api/warmup-stop": r_warmup_stop,
     "/api/warmup-restart": r_warmup_restart,
     "/api/warmup-restore": r_warmup_restore,
+    "/api/warmup-delete": r_warmup_delete,
     "/api/hunter-set": r_hunter_set,
     "/api/hunter-run": r_hunter_run,
     "/api/trends-refresh": r_trends_refresh,
