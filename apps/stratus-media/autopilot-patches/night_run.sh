@@ -72,7 +72,7 @@ fi
 # Keep the Mac awake (not the display) while this script runs.
 caffeinate -i -w $$ &
 
-open -ga Docker
+open -g -j -a Docker   # -g: stay in background, -j: launch hidden (no Docker Desktop window)
 for i in $(seq 1 60); do "$DOCKER" info >/dev/null 2>&1 && break; sleep 5; done
 "$DOCKER" info >/dev/null 2>&1 || { echo "$(ts) Docker did not start"; notify "Night run failed: Docker did not start."; exit 1; }
 # Interrupted jobs must not auto-resume (their key is gone; they would just fail).

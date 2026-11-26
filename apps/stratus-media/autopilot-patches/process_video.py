@@ -65,8 +65,8 @@ BIG_PROMPT = ("You get the audio of one short clip (under 60 s) and {n} frames f
               "{{\"conversation\": true if it is mainly people talking (podcast, debate, interview, panel, "
               "conversation, call-in show), \"big\": true only if it is a BIG moment: a gotcha or mic-drop point that "
               "makes the other person look foolish, someone caught contradicting themselves, a heated back-and-forth, "
-              "a big laugh, or a shocking reveal. Plain chit-chat, intros, ads, slow explaining and calm agreement "
-              "are NOT big. \"score\": 1-10 how strong the moment is, \"kind\": short label like 'gotcha', "
+              "a big laugh, or a shocking reveal. Plain chit-chat, intros, ads, slow explaining, calm agreement "
+              "and one person just telling a story are NOT big. \"score\": 1-10 how strong the moment is, \"kind\": short label like 'gotcha', "
               "'heated', 'big laugh', 'contradiction', 'reveal' or 'none', \"why\": one short sentence}}")
 # If OpenShorts' /api/process takes a free-text focus for picking moments, set its field name here.
 OPENSHORTS_HINT_FIELD = None
@@ -409,6 +409,11 @@ def collect(api, status, source, display=None, game_key=None, big_key=None):
         raise RuntimeError("job finished with no clips")
     order = sorted(range(len(clips)),
                    key=lambda i: (-(float(clips[i].get("predicted_score") or -1)), i))
+    name = display or source
+    if not display and source.startswith(("http://", "https://")):
+        import glob
+        meta = glob.glob(os.path.join(REPO, "output", job_id, "*_metadata.json"))
+        name = os.path.basename(meta[0])[:-len("_metadata.json")] if meta else "link " + job_id[:8]
     if game_key:
         keep = []
         for i in order:
@@ -423,13 +428,8 @@ def collect(api, status, source, display=None, game_key=None, big_key=None):
             raise RuntimeError("GAMEPLAY: no game play moments found in this video")
         order = keep
     elif big_key:
-        order = pick_big_moments(order, clips, job_id, big_key, display or os.path.basename(source))
+        order = pick_big_moments(order, clips, job_id, big_key, os.path.basename(name).replace("_", " "))
     order = order[:TOP_N]
-    name = display or source
-    if not display and source.startswith(("http://", "https://")):
-        import glob
-        meta = glob.glob(os.path.join(REPO, "output", job_id, "*_metadata.json"))
-        name = os.path.basename(meta[0])[:-len("_metadata.json")] if meta else "link " + job_id[:8]
     folder = os.path.join(OUT_ROOT, safe_name(name))
     if os.path.exists(folder):
         folder += time.strftime(" %Y-%m-%d %H%M")
