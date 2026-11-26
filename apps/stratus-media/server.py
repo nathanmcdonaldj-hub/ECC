@@ -3499,12 +3499,25 @@ def _twitch_clips(prof, hours):
     if prof.get("game_id"):
         clips = twitch_get("clips", {"game_id": prof["game_id"], "started_at": since, "first": 100})
     else:
+        # Not a game: top clips from Just Chatting and IRL whose titles mention the subject,
+        # plus clips from channels that match the subject by name.
+        words = [w for w in re.findall(r"[a-z0-9]+", (prof.get("subject") or prof["twitch_search"]).lower()) if len(w) >= 3]
+        for gid in ("509658", "509672"):   # Just Chatting, IRL
+            try:
+                got = twitch_get("clips", {"game_id": gid, "started_at": since, "first": 100})
+            except RuntimeError:
+                continue
+            clips += [c for c in got if words and any(w in (c.get("title") or "").lower() for w in words)]
         chans = twitch_get("search/channels", {"query": prof["twitch_search"], "first": 20})
         for ch in chans[:12]:
             try:
                 clips += twitch_get("clips", {"broadcaster_id": ch["id"], "started_at": since, "first": 20})
             except RuntimeError:
                 continue
+        uniq = {}
+        for c in clips:
+            uniq.setdefault(c["id"], c)
+        clips = list(uniq.values())
     out = []
     for c in clips:
         if c.get("language") and not str(c["language"]).startswith("en"):
@@ -3662,13 +3675,8 @@ def run_hunter(manual=False):
                         "no-twitch": "Twitch needs its one-time setup (the yellow box)."}.get(
                     code, "Twitch said no to the keys. Check them in the yellow box." if code.startswith("twitch-auth")
                     else "Couldn't search right now ({}). I'll try again next time.".format(code[:60]))
+            # The switch decides the platform: Twitch never falls back to YouTube (his rule, 2026-11-26).
             fell_back = False
-            if plat == "twitch" and not cands and not note and find_ytdlp():
-                try:   # Twitch had nothing for this subject: look on YouTube instead
-                    cands = youtube_candidates(prof)
-                    fell_back = bool(cands)
-                except RuntimeError:
-                    pass
             fresh = [c for c in cands if c["key"] not in h["seen"]]
             fresh.sort(key=lambda x: -x["views"])
             found = []
@@ -3694,12 +3702,15 @@ def run_hunter(manual=False):
                 sent += 1 if ok else 0
                 found.append(c)
             if not cands and not note:
-                note = ("Nothing found on {} for “{}” in the last week. Try YouTube, or a broader subject."
-                        .format("Twitch" if plat == "twitch" else "YouTube", subject))
+                note = ("Nothing on {} for “{}” this week. Twitch is mostly live streams and games, so try YouTube for this subject."
+                        .format("Twitch", subject) if plat == "twitch" else
+                        "Nothing found on YouTube for “{}”. Try a broader subject.".format(subject))
             if cands and not note:
                 note = ("Nothing on Twitch, so I looked on YouTube. " if fell_back else "") + (
                     "Sent {} big video(s) to the clipper.".format(sent) if sent else
-                    "Nothing big enough right now (skipped {} small ones). I'll look again next time.".format(too_small)
+                    ("Nothing big enough on Twitch right now (skipped {} small ones). Twitch is mostly live streams and games, so try YouTube for this subject.".format(too_small)
+                     if plat == "twitch" else
+                     "Nothing big enough right now (skipped {} small ones). I'll look again next time.".format(too_small))
                     if fresh else "Nothing new since last time.")
             with LOCK:
                 h["items"] = (found + h["items"])[:HUNT_MAX_ITEMS]
