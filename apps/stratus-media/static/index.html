@@ -1025,6 +1025,7 @@ function renderWarmup(force) {
       <label class="f">New niche<input type="text" id="wNiche" placeholder="e.g. GTA 6 clips, dog training, anti-aging"></label>
       <div class="chips">${["instagram", "tiktok", "youtube"].map(p => `<button class="chip ${p !== "youtube" ? "on" : ""}" data-wplat="${p}">${PLAT[p] || p}</button>`).join("")}</div>
       <button class="btn go" id="wStart" style="padding:12px">🔥 Start warm-up</button>
+      ${hist.some(x => x.can_restore) ? `<button class="btn sm" id="wRestore">↩ Bring back my last warm-up (${esc(hist.find(x => x.can_restore).niche)})</button>` : ""}
       <span class="muted" style="font-size:12px">Your manager writes 14 days of short to-dos for this niche: what to search, who to follow, what to comment.</span>
     </div><div class="cards"><h3 style="margin:0">Past warm-ups</h3>${hist.length ? hist.map(x => `<div class="box"><b>${esc(x.niche)}</b><span class="muted" style="font-size:12px">${esc(x.started)} → ${esc(x.ended)} · ${x.days_done} of 14 days done</span></div>`).join("") : `<div class="empty">None yet.</div>`}</div></div>`;
     return;
@@ -1047,7 +1048,9 @@ function renderWarmup(force) {
       <h3>${day === w.day ? "Today" : "Day " + day} · about ${mins} min</h3>
       ${d.tasks.map((t, i) => `<label class="wtask ${t.done ? "done" : ""}"><input type="checkbox" data-wtask="${day}:${i}" ${t.done ? "checked" : ""}><span>${esc(t.t)}</span><small>${t.m} min</small></label>`).join("")}
       ${d.done === d.tasks.length ? `<div class="rules game">✅ Day ${day} done. Nice work.</div>` : ""}
-      <button class="btn bad sm" id="wStop" style="align-self:flex-start">Finish warm-up</button>
+      <div class="row"><button class="btn sm" id="wRestart">↺ Start over</button>
+        ${(S.warmup_history || []).some(x => x.can_restore) ? `<button class="btn sm" id="wRestore">↩ Bring back my last warm-up${(() => { const x = (S.warmup_history || []).find(y => y.can_restore); return x ? " (" + esc(x.niche) + ")" : ""; })()}</button>` : ""}
+        <button class="btn bad sm" id="wStop">Finish warm-up</button></div>
     </div><div class="cards">
       <div class="box"><b>#️⃣ Hashtags to search</b><span class="muted" style="font-size:12px">Tap one to copy it</span><div class="chips">${(w.hashtags || []).map(x => `<button class="chip" data-wcopy="${esc(x)}">${esc(x)}</button>`).join("")}</div></div>
       <div class="box"><b>👥 Accounts to follow</b><ul class="steps">${(w.accounts || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>
@@ -1101,6 +1104,8 @@ document.addEventListener("click", async e => {
   if (d.wday) { wSel = +d.wday === S.warmup.day ? null : +d.wday; return renderWarmup(true); }
   if (d.wcopy) { await copyText(d.wcopy); return toast("Copied"); }
   if (t.id === "wLogSave") { for (const i of document.querySelectorAll("[data-wlog]")) if (i.value.trim()) await api("/api/warmup-log", {platform: i.dataset.wlog, followers: i.value}); return renderWarmup(true); }
+  if (t.id === "wRestart") { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to start over"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-restart"); wSel = null; return renderWarmup(true); }
+  if (t.id === "wRestore") { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to bring it back"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-restore"); wSel = null; return renderWarmup(true); }
   if (t.id === "wStop") { if (!confirmBox) { confirmBox = true; t.textContent = "Tap again to finish"; setTimeout(() => confirmBox = false, 4000); return; } confirmBox = false; await api("/api/warmup-stop"); wSel = null; return renderWarmup(true); }
   if (d.ckind && !demo) { const ask = $("#cAsk").value; cKind = d.ckind; $("#cForm").innerHTML = createForm(); $("#cAsk").value = ask; return; }
   if (d.clen) { cLen = +d.clen; const ask = $("#cAsk").value; $("#cForm").innerHTML = createForm(); $("#cAsk").value = ask; return; }

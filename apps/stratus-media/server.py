@@ -1743,7 +1743,8 @@ def build_state(for_model=False):
         "warmup": warmup_public(STATE.get("warmup")),
         "hunter": hunter_public(),
         "trends": trends_public(),
-        "warmup_history": STATE.get("warmup_history", [])[::-1],
+        "warmup_history": [{k: v for k, v in x.items() if k != "full"} | {"can_restore": bool(x.get("full"))}
+                           for x in STATE.get("warmup_history", [])][::-1],
         "music": list_music(),
         "music_ready": bool(find_ffmpeg()),
         "voices": voice_options(),
@@ -3298,7 +3299,8 @@ def _warmup_summary(w):
     pub = warmup_public(w)
     return {"niche": w["niche"], "started": w["started"], "ended": now().strftime("%Y-%m-%d"),
             "days_done": sum(1 for x in pub["days"] if x["state"] == "done"),
-            "before": w.get("before"), "after": pub["now"], "manual": w.get("manual")}
+            "before": w.get("before"), "after": pub["now"], "manual": w.get("manual"),
+            "full": json.loads(json.dumps(w))}   # the whole plan + check marks, so it can be brought back
 
 
 def r_warmup_check(d):
@@ -3334,6 +3336,41 @@ def r_warmup_log(d):
         rec["latest"], rec["latest_at"] = n, now().strftime("%Y-%m-%d")
         persist()
     return {"ok": True, "message": "Saved."}
+
+
+def r_warmup_restart(d):
+    """Start over: same niche and plan, every box unticked, Day 1 is today."""
+    with LOCK:
+        w = STATE.get("warmup")
+        if not w:
+            return {"ok": False}
+        STATE.setdefault("warmup_history", []).append(_warmup_summary(w))
+        STATE["warmup_history"] = STATE["warmup_history"][-10:]
+        for tasks in w["days"]:
+            for t in tasks:
+                t["done"] = False
+        w["started"] = now().strftime("%Y-%m-%d")
+        w["before"] = warmup_numbers()
+        w["manual"] = {}
+        persist()
+    return {"ok": True, "message": "Started over. Day 1 is today."}
+
+
+def r_warmup_restore(d):
+    """Bring back the warm-up that was replaced or finished most recently, with its check marks."""
+    with LOCK:
+        hist = STATE.get("warmup_history") or []
+        idx = next((i for i in range(len(hist) - 1, -1, -1) if hist[i].get("full")), None)
+        if idx is None:
+            return {"ok": False, "message": "There's no earlier warm-up to bring back."}
+        old = hist.pop(idx)["full"]
+        cur = STATE.get("warmup")
+        if cur:
+            hist.append(_warmup_summary(cur))
+        STATE["warmup_history"] = hist[-10:]
+        STATE["warmup"] = old
+        persist()
+    return {"ok": True, "message": "Brought back “{}”.".format(old.get("niche"))}
 
 
 def r_warmup_stop(d):
@@ -3900,6 +3937,8 @@ ROUTES = {
     "/api/warmup-check": r_warmup_check,
     "/api/warmup-log": r_warmup_log,
     "/api/warmup-stop": r_warmup_stop,
+    "/api/warmup-restart": r_warmup_restart,
+    "/api/warmup-restore": r_warmup_restore,
     "/api/hunter-set": r_hunter_set,
     "/api/hunter-run": r_hunter_run,
     "/api/trends-refresh": r_trends_refresh,
