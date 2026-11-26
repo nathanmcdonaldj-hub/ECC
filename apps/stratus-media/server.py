@@ -3423,8 +3423,14 @@ _HUNT = {"running": False, "token": None, "token_exp": 0.0, "fans": {}}
 HUNT_MIN = {
     "youtube": {"views": 100000, "followers": 100000},   # video views, channel subscribers
     "twitch": {"views": 1000, "followers": 50000},       # clip views, channel followers
+    "kick": {"views": 1000, "followers": 50000},         # clip views, channel followers
+    "rumble": {"views": 50000, "followers": 50000},      # video views, channel followers
+    "reddit": {"views": 2000, "followers": 100000},      # post upvotes, subreddit members
 }
-HUNT_MIN_NO_FANS = {"youtube": 500000, "twitch": 10000}  # when the follower count can't be read
+HUNT_MIN_NO_FANS = {"youtube": 500000, "twitch": 10000, "kick": 10000, "rumble": 100000, "reddit": 10000}
+HUNT_SOURCES = ("youtube", "twitch", "kick", "rumble", "reddit")   # Instagram blocks free search
+HUNT_NAMES = {"youtube": "YouTube", "twitch": "Twitch", "kick": "Kick", "rumble": "Rumble", "reddit": "Reddit"}
+WEB_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
 HUNT_PROFILE_SYSTEM = (
     "You help a short-video clipping tool. Given a subject he typed, reply with JSON only: "
@@ -3685,7 +3691,16 @@ def big_enough(c):
     rule = HUNT_MIN.get(c["platform"], HUNT_MIN["youtube"])
     if c["views"] < rule["views"]:
         return False, "Too few views ({})".format(c["views"])
-    fans = twitch_followers(c["creator"]) if c["platform"] == "twitch" else youtube_subscribers(c.get("creator_url"))
+    if c.get("followers") is not None:
+        fans = c["followers"]            # Reddit (subreddit members) comes with the search
+    elif c["platform"] == "twitch":
+        fans = twitch_followers(c["creator"])
+    elif c["platform"] == "kick":
+        fans = kick_followers(c.get("slug") or c["creator"])
+    elif c["platform"] == "youtube":
+        fans = youtube_subscribers(c.get("creator_url"))
+    else:
+        fans = None                      # Rumble: follower count isn't in the search results
     c["followers"] = fans
     if fans is None:
         need = HUNT_MIN_NO_FANS.get(c["platform"], 500000)
@@ -3696,6 +3711,171 @@ def big_enough(c):
             return True, ""
         return False, "Account too small ({})".format(fans)
     return True, ""
+
+
+def web_get(url, as_json=True, timeout=30):
+    req = urllib.request.Request(url, headers={"User-Agent": WEB_UA, "Accept": "application/json, text/html;q=0.9",
+                                               "Accept-Language": "en-US,en;q=0.9"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError("blocked:{}".format(exc.code))
+    except (urllib.error.URLError, OSError) as exc:
+        raise RuntimeError("net:" + str(exc)[:60])
+    if not as_json:
+        return raw
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise RuntimeError("blocked:not-json")
+
+
+def _num(x):
+    """'1.2M' / '34K' / '5,321' -> int."""
+    if isinstance(x, (int, float)):
+        return int(x)
+    m = re.match(r"\s*([\d.,]+)\s*([KkMmBb]?)", str(x or ""))
+    if not m:
+        return 0
+    n = float(m.group(1).replace(",", ""))
+    return int(n * {"k": 1e3, "m": 1e6, "b": 1e9}.get(m.group(2).lower(), 1))
+
+
+# ---- Reddit (free JSON search: top video posts this week, then this month)
+def reddit_candidates(prof):
+    q = prof.get("subject") or prof["youtube_query"]
+    out, seen = [], set()
+    for t in ("week", "month"):
+        data = None
+        for host in ("https://www.reddit.com", "https://old.reddit.com"):
+            try:
+                data = web_get(host + "/search.json?" + urllib.parse.urlencode(
+                    {"q": q, "sort": "top", "t": t, "type": "link", "limit": 100, "raw_json": 1}))
+                break
+            except RuntimeError:
+                continue
+        if data is None:
+            raise RuntimeError("blocked:reddit")
+        for ch in ((data.get("data") or {}).get("children") or []):
+            p = ch.get("data") or {}
+            if p.get("over_18") or p.get("id") in seen:
+                continue
+            dom = (p.get("domain") or "").lower()
+            ext = p.get("url_overridden_by_dest") or p.get("url") or ""
+            if p.get("is_video"):
+                link = "https://www.reddit.com" + p.get("permalink", "")
+                dur = ((p.get("media") or {}).get("reddit_video") or {}).get("duration")
+            elif any(x in dom for x in ("youtube.com", "youtu.be", "streamable.com", "twitch.tv", "kick.com", "rumble.com")):
+                link, dur = ext, None
+            else:
+                continue   # not a video post
+            seen.add(p.get("id"))
+            thumb = p.get("thumbnail") if str(p.get("thumbnail") or "").startswith("http") else None
+            out.append({"key": "rd:" + p["id"], "url": link, "title": p.get("title") or "",
+                        "creator": "r/" + (p.get("subreddit") or ""), "creator_url": "https://www.reddit.com/r/" + (p.get("subreddit") or ""),
+                        "views": int(p.get("score") or 0), "followers": p.get("subreddit_subscribers"),
+                        "thumb": thumb, "made": None, "platform": "reddit", "length": dur})
+        if sum(1 for c in out if c["views"] >= HUNT_MIN["reddit"]["views"]) >= 3:
+            break
+    out.sort(key=lambda x: -x["views"])
+    return out
+
+
+# ---- Kick (its public website API: top clips this week)
+def _kick_clips(path):
+    data = web_get("https://kick.com/api/v2/" + path)
+    clips = data.get("clips") if isinstance(data, dict) else data
+    return clips or []
+
+
+def kick_candidates(prof):
+    words = prof.get("subject") or prof["twitch_search"]
+    found = web_get("https://kick.com/api/search?" + urllib.parse.urlencode({"searched_word": words}))
+    clips = []
+    cats = (found.get("categories") or []) if isinstance(found, dict) else []
+    chans = (found.get("channels") or []) if isinstance(found, dict) else []
+    if prof.get("is_game") and cats:
+        slug = cats[0].get("slug")
+        for when in ("week", "month"):
+            try:
+                clips = _kick_clips("categories/{}/clips?sort=view&time={}".format(slug, when))
+            except RuntimeError:
+                clips = []
+            if len(clips) >= 5:
+                break
+    for ch in chans[:8]:
+        try:
+            clips += _kick_clips("channels/{}/clips?sort=view&time=week".format(ch.get("slug")))
+        except RuntimeError:
+            continue
+    out, seen = [], set()
+    for c in clips:
+        cid = str(c.get("id") or "")
+        if not cid or cid in seen:
+            continue
+        seen.add(cid)
+        chan = c.get("channel") or {}
+        slug = chan.get("slug") or chan.get("username") or ""
+        out.append({"key": "kk:" + cid, "url": "https://kick.com/{}/clips/{}".format(slug, cid),
+                    "title": c.get("title") or "", "creator": chan.get("username") or slug, "slug": slug,
+                    "creator_url": "https://kick.com/" + slug, "views": _num(c.get("view_count") or c.get("views")),
+                    "thumb": c.get("thumbnail_url"), "made": c.get("created_at"), "platform": "kick",
+                    "length": c.get("duration")})
+    out.sort(key=lambda x: -x["views"])
+    return out
+
+
+def kick_followers(slug):
+    def fetch():
+        d = web_get("https://kick.com/api/v2/channels/" + urllib.parse.quote(slug))
+        n = d.get("followers_count") or d.get("followersCount")
+        return int(n) if n is not None else None
+    return _fans_cached("kk:" + slug.lower(), fetch) if slug else None
+
+
+# ---- Rumble (its search page, sorted by views, this week then this month)
+def rumble_candidates(prof):
+    q = prof.get("subject") or prof["youtube_query"]
+    out, seen = [], set()
+    for when in ("this-week", "this-month"):
+        html = web_get("https://rumble.com/search/video?" + urllib.parse.urlencode({"q": q, "sort": "views", "date": when}),
+                       as_json=False)
+        for m in re.finditer(r'<li[^>]*class="[^"]*video-listing-entry[^"]*"[^>]*>(.*?)</li>', html, re.S):
+            block = m.group(1)
+            href = re.search(r'href="(/v[0-9a-z]+-[^"]+?\.html)', block)
+            if not href or href.group(1) in seen:
+                continue
+            seen.add(href.group(1))
+            title = re.search(r'<h3[^>]*>(.*?)</h3>', block, re.S)
+            views = re.search(r'data-views="([\d,]+)"', block) or re.search(r'([\d.,]+[KMB]?)\s*views', block, re.I) \
+                or re.search(r'video-item--views[^>]*data-value="([^"]+)"', block)
+            chan = re.search(r'href="(/c/[^"]+|/user/[^"]+)"[^>]*>\s*(?:<[^>]+>\s*)*([^<]+)', block)
+            dur = re.search(r'video-item--duration[^>]*data-value="([\d:]+)"', block)
+            secs = None
+            if dur:
+                parts = [int(x) for x in dur.group(1).split(":")]
+                secs = sum(v * 60 ** i for i, v in enumerate(reversed(parts)))
+            if secs and (secs < 120 or secs > 90 * 60):
+                continue
+            thumb = re.search(r'<img[^>]+src="([^"]+)"', block)
+            out.append({"key": "rb:" + href.group(1), "url": "https://rumble.com" + href.group(1),
+                        "title": re.sub(r"<[^>]+>", "", title.group(1)).strip() if title else "",
+                        "creator": chan.group(2).strip() if chan else "",
+                        "creator_url": "https://rumble.com" + chan.group(1) if chan else "",
+                        "views": _num(views.group(1)) if views else 0, "thumb": thumb.group(1) if thumb else None,
+                        "made": None, "platform": "rumble", "length": secs})
+        if sum(1 for c in out if c["views"] >= HUNT_MIN["rumble"]["views"]) >= 3:
+            break
+    out.sort(key=lambda x: -x["views"])
+    return out
+
+
+def hunt_platforms(h):
+    pl = [p for p in (h.get("platforms") or []) if p in HUNT_SOURCES]
+    if not pl and h.get("platform") in HUNT_SOURCES:
+        pl = [h["platform"]]
+    return pl
 
 
 def already_reposted(item):
@@ -3727,47 +3907,57 @@ def run_hunter(manual=False):
     _HUNT["running"] = True
     try:
         subject = (h.get("subject") or "").strip()
-        plat = h.get("platform")
+        plats = hunt_platforms(h)
         note = ""
         sent = 0
         if not subject:
             note = "Type a subject first."
-        elif plat == "instagram":
-            note = "Instagram doesn't allow free searching yet. Switch to Twitch or YouTube."
-        elif plat == "twitch" and not all(twitch_keys()):
-            note = "Twitch needs its one-time setup (the yellow box)."
+        elif not plats:
+            note = "Tick at least one place to look."
         elif len(hunter_pending()) >= HUNT_INBOX_CAP:
             note = "The clipper still has {} hunted videos to finish. I'll look again next time.".format(len(hunter_pending()))
         else:
             prof = hunt_profile(subject)
-            try:
-                cands = twitch_candidates(prof) if plat == "twitch" else youtube_candidates(prof)
-            except RuntimeError as exc:
-                code = str(exc)
-                cands = []
-                note = {"no-ytdlp": "The YouTube finder tool isn't installed yet. Ask Claude.",
-                        "no-twitch": "Twitch needs its one-time setup (the yellow box)."}.get(
-                    code, "Twitch said no to the keys. Check them in the yellow box." if code.startswith("twitch-auth")
-                    else "Couldn't search right now ({}). I'll try again next time.".format(code[:60]))
-            # The switch decides the platform: Twitch never falls back to YouTube (his rule, 2026-11-26).
-            fell_back = False
+            # Only the ticked places are searched; one never fills in for another (his rule, 2026-11-26).
+            cands, notes = [], {}
+            for plat in plats:
+                name = HUNT_NAMES[plat]
+                if plat == "twitch" and not all(twitch_keys()):
+                    notes[plat] = "Twitch needs its one-time setup (the yellow box)"
+                    continue
+                try:
+                    got = {"twitch": twitch_candidates, "youtube": youtube_candidates, "kick": kick_candidates,
+                           "rumble": rumble_candidates, "reddit": reddit_candidates}[plat](prof)
+                except RuntimeError as exc:
+                    code = str(exc)
+                    notes[plat] = {"no-ytdlp": "the YouTube finder tool isn't installed yet",
+                                   "no-twitch": "needs its one-time setup (the yellow box)"}.get(
+                        code, "said no to the keys" if code.startswith("twitch-auth") else
+                        ("blocked the search right now" if code.startswith("blocked") else "couldn't search right now"))
+                    notes[plat] = name + " " + notes[plat]
+                    continue
+                if not got:
+                    notes[plat] = "nothing on {} this week".format(name) + (
+                        " (it's mostly live streams and games)" if plat in ("twitch", "kick") else "")
+                cands += got
             fresh = [c for c in cands if c["key"] not in h["seen"]]
-            fresh.sort(key=lambda x: -x["views"])
+            # Rank across places by how far each one clears its own bar (views vs upvotes aren't the same size).
+            fresh.sort(key=lambda x: -(x["views"] / float(HUNT_MIN.get(x["platform"], HUNT_MIN["youtube"])["views"])))
             found = []
-            too_small = 0
-            for c in fresh[:25]:
+            too_small = {}
+            for c in fresh[:40]:
                 if sent >= int(h.get("per_run") or 2):
                     break
                 if c["views"] < HUNT_MIN.get(c["platform"], HUNT_MIN["youtube"])["views"]:
-                    too_small += 1
-                    continue   # list is sorted by views, but keep counting what we skip
+                    too_small[c["platform"]] = too_small.get(c["platform"], 0) + 1
+                    continue
                 ok_size, why = big_enough(c)
                 if not ok_size:
-                    too_small += 1
+                    too_small[c["platform"]] = too_small.get(c["platform"], 0) + 1
                     continue
                 c["found_at"] = now_iso()
                 h["seen"][c["key"]] = now_iso()
-                if c["platform"] == "twitch" and already_reposted(c):
+                if c["platform"] in ("twitch", "kick") and already_reposted(c):
                     c.update(state="skipped", why="Another page already posted this one")
                     found.append(c)
                     continue
@@ -3775,17 +3965,21 @@ def run_hunter(manual=False):
                 c.update(state="sent" if ok else "skipped", why="Sent to the clipper" if ok else "Couldn't add it")
                 sent += 1 if ok else 0
                 found.append(c)
-            if not cands and not note:
-                note = ("Nothing on {} for “{}” this week. Twitch is mostly live streams and games, so try YouTube for this subject."
-                        .format("Twitch", subject) if plat == "twitch" else
-                        "Nothing found on YouTube for “{}”. Try a broader subject.".format(subject))
-            if cands and not note:
-                note = ("Nothing on Twitch, so I looked on YouTube. " if fell_back else "") + (
-                    "Sent {} big video(s) to the clipper.".format(sent) if sent else
-                    ("Nothing big enough on Twitch right now (skipped {} small ones). Twitch is mostly live streams and games, so try YouTube for this subject.".format(too_small)
-                     if plat == "twitch" else
-                     "Nothing big enough right now (skipped {} small ones). I'll look again next time.".format(too_small))
-                    if fresh else "Nothing new since last time.")
+            sent_by = {}
+            for c in found:
+                if c.get("state") == "sent":
+                    sent_by[c["platform"]] = sent_by.get(c["platform"], 0) + 1
+            parts = []
+            for plat in plats:
+                if plat in sent_by:
+                    parts.append("{}: sent {}".format(HUNT_NAMES[plat], sent_by[plat]))
+                elif plat in notes:
+                    parts.append(notes[plat][0].upper() + notes[plat][1:])
+                elif too_small.get(plat):
+                    parts.append("{}: nothing big enough ({} small skipped)".format(HUNT_NAMES[plat], too_small[plat]))
+                else:
+                    parts.append("{}: nothing new".format(HUNT_NAMES[plat]))
+            note = ("Sent {} big video(s) to the clipper. ".format(sent) if sent else "Nothing big enough this time. ") + " · ".join(parts)
             with LOCK:
                 h["items"] = (found + h["items"])[:HUNT_MAX_ITEMS]
                 # keep the seen list from growing forever
@@ -3849,7 +4043,8 @@ def hunter_public():
             nxt = nice_dt(datetime.strptime(h["last_run"], "%Y-%m-%dT%H:%M:%S") + timedelta(hours=h.get("every", 2)))
         except ValueError:
             nxt = None
-    return {k: h.get(k) for k in ("on", "platform", "subject", "every", "per_run", "last_run", "last_note", "lessons")} | {
+    return {k: h.get(k) for k in ("on", "subject", "every", "per_run", "last_run", "last_note", "lessons")} | {
+        "platforms": hunt_platforms(h),
         "running": _HUNT["running"], "next": nxt, "items": h["items"][:30],
         "is_game": bool(prof.get("is_game")) if prof.get("subject") == h.get("subject") else None,
         "game_name": prof.get("game_name") if prof.get("subject") == h.get("subject") else None,
@@ -3861,8 +4056,11 @@ def hunter_public():
 def r_hunter_set(d):
     h = hunter()
     with LOCK:
-        if d.get("platform") in ("twitch", "youtube", "instagram"):
-            h["platform"] = d["platform"]
+        if isinstance(d.get("platforms"), list):
+            h["platforms"] = [p for p in HUNT_SOURCES if p in d["platforms"]]
+            h.pop("platform", None)   # the old single choice is replaced by the ticked list
+        elif d.get("platform") in HUNT_SOURCES:
+            h["platforms"] = [d["platform"]]
         if "subject" in d:
             h["subject"] = (d.get("subject") or "").strip()[:80]
         try:
