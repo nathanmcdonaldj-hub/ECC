@@ -3347,21 +3347,16 @@ def r_warmup_log(d):
 
 
 def r_warmup_restart(d):
-    """Start over: same niche and plan, every box unticked, Day 1 is today."""
+    """Start over: wipe the current warm-up and go back to the blank Start screen (his ask, 2026-11-26).
+    A copy is tucked away (not shown anywhere) just in case."""
     with LOCK:
         w = STATE.get("warmup")
         if not w:
             return {"ok": False}
-        STATE.setdefault("warmup_history", []).append(_warmup_summary(w))
-        STATE["warmup_history"] = STATE["warmup_history"][-10:]
-        for tasks in w["days"]:
-            for t in tasks:
-                t["done"] = False
-        w["started"] = now().strftime("%Y-%m-%d")
-        w["before"] = warmup_numbers()
-        w["manual"] = {}
+        STATE["warmup_trash"] = json.loads(json.dumps(w))
+        STATE["warmup"] = None
         persist()
-    return {"ok": True, "message": "Started over. Day 1 is today."}
+    return {"ok": True, "message": "Cleared. Type a niche to start fresh."}
 
 
 def r_warmup_restore(d):
