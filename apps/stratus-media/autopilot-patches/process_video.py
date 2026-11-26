@@ -49,6 +49,29 @@ GAME_PROMPT = ("These are {n} frames from one short clip of a livestream. For EA
                "{{\"gameplay\": [true/false for each frame in order]}}")
 
 
+# --- Stratus House "Big moments only" (added 2026-11-26) --------------------
+# For podcasts, debates, interviews and other conversation videos, only the BIG moments are kept:
+# gotcha / mic-drop points, someone caught contradicting themselves, heated back-and-forths,
+# big laughs, shocking reveals. Gemini (same key) listens to each candidate's audio and looks at
+# 4 frames. If the video is a conversation and no candidate is a big moment, NO clips are made and
+# the log says "BIGMOMENT: no big moment found" (the dashboard tells Mr. McDonald).
+# Videos that aren't conversations (sports, vlogs, gameplay) keep the normal top 3.
+TALK_CANDIDATES = 6
+BIG_MIN_SCORE = 7
+BIG_HINT = ("Pick only the BIG moments: a gotcha or mic-drop point where one person makes the other look foolish, "
+            "someone caught contradicting themselves, a heated back-and-forth, a big laugh, or a shocking reveal. "
+            "Skip small talk, intros, ads and calm explaining.")
+BIG_PROMPT = ("You get the audio of one short clip (under 60 s) and {n} frames from it. Reply with JSON only: "
+              "{{\"conversation\": true if it is mainly people talking (podcast, debate, interview, panel, "
+              "conversation, call-in show), \"big\": true only if it is a BIG moment: a gotcha or mic-drop point that "
+              "makes the other person look foolish, someone caught contradicting themselves, a heated back-and-forth, "
+              "a big laugh, or a shocking reveal. Plain chit-chat, intros, ads, slow explaining and calm agreement "
+              "are NOT big. \"score\": 1-10 how strong the moment is, \"kind\": short label like 'gotcha', "
+              "'heated', 'big laugh', 'contradiction', 'reveal' or 'none', \"why\": one short sentence}}")
+# If OpenShorts' /api/process takes a free-text focus for picking moments, set its field name here.
+OPENSHORTS_HINT_FIELD = None
+
+
 def log(*a):
     print(time.strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
 
@@ -226,6 +249,80 @@ def is_gameplay(path, key):
     return None
 
 
+def clip_audio(path):
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        f = os.path.join(td, "a.mp3")
+        subprocess.run([HOST_FFMPEG, "-y", "-loglevel", "error", "-i", path, "-vn", "-ac", "1", "-ar", "22050",
+                        "-b:a", "48k", f], timeout=120)
+        if os.path.exists(f):
+            with open(f, "rb") as fh:
+                return fh.read()
+    return None
+
+
+def big_moment(path, key):
+    """Gemini's verdict for one candidate: dict(conversation, big, score, kind, why), or None if the check failed."""
+    import base64
+    audio = clip_audio(path)
+    frames = clip_frames(path)
+    if not audio:
+        return None
+    parts = [{"text": BIG_PROMPT.format(n=len(frames))},
+             {"inline_data": {"mime_type": "audio/mp3", "data": base64.b64encode(audio).decode()}}] + [
+        {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(b).decode()}} for b in frames]
+    body = json.dumps({"contents": [{"parts": parts}],
+                       "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}).encode()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, data=body, method="POST",
+                                         headers={"Content-Type": "application/json", "x-goog-api-key": key})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                data = json.loads(r.read())
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            v = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
+            return {"conversation": bool(v.get("conversation")), "big": bool(v.get("big")),
+                    "score": int(v.get("score") or 0), "kind": str(v.get("kind") or "")[:30],
+                    "why": str(v.get("why") or "")[:160]}
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 503) and attempt < 2:
+                time.sleep(20)
+                continue
+            log(f"BIGMOMENT: check failed (HTTP {e.code})")
+            return None
+        except Exception as e:
+            log(f"BIGMOMENT: check failed ({str(e)[:120]})")
+            return None
+    return None
+
+
+def pick_big_moments(order, clips, job_id, key, name):
+    """Order of candidates to keep. Conversation videos keep only big moments (best first)."""
+    verdicts = {}
+    for i in order:
+        f = os.path.basename((clips[i].get("video_url") or "").split("?")[0])
+        v = big_moment(os.path.join(REPO, "output", job_id, f), key)
+        verdicts[i] = v
+        if v is None:
+            log(f"BIGMOMENT: candidate {i} -> check failed")
+        else:
+            log(f"BIGMOMENT: candidate {i} -> {'conversation' if v['conversation'] else 'not conversation'}, "
+                f"{'BIG' if v['big'] else 'small'} {v['score']}/10 {v['kind']}: {v['why']}")
+    checked = [v for v in verdicts.values() if v]
+    if not checked:
+        raise RuntimeError(f"BIGMOMENT: check failed for every clip: {name}")
+    if sum(1 for v in checked if v["conversation"]) * 2 < len(checked):
+        return order   # not a conversation video: normal picks
+    big = [i for i in order if verdicts[i] and verdicts[i]["big"] and verdicts[i]["score"] >= BIG_MIN_SCORE]
+    if not big:
+        raise RuntimeError(f"BIGMOMENT: no big moment found: {name}")
+    big.sort(key=lambda i: (-verdicts[i]["score"], order.index(i)))
+    for i in big:
+        clips[i]["big_moment"] = verdicts[i]
+    return big
+
+
 MEDIA_EXT = (".mp4", ".mov", ".m4v", ".mkv", ".webm", ".m4a", ".mp3", ".wav", ".aac", ".opus", ".ogg")
 
 
@@ -305,7 +402,7 @@ def thumbnail(clip_host_path, job_id, clip_file, dest):
     shutil.move(os.path.join(REPO, "output", job_id, os.path.basename(tmp)), dest)
 
 
-def collect(api, status, source, display=None, game_key=None):
+def collect(api, status, source, display=None, game_key=None, big_key=None):
     job_id = status["job_id"]
     clips = (status.get("result") or {}).get("clips") or []
     if not clips:
@@ -325,6 +422,8 @@ def collect(api, status, source, display=None, game_key=None):
         if not keep:
             raise RuntimeError("GAMEPLAY: no game play moments found in this video")
         order = keep
+    elif big_key:
+        order = pick_big_moments(order, clips, job_id, big_key, display or os.path.basename(source))
     order = order[:TOP_N]
     name = display or source
     if not display and source.startswith(("http://", "https://")):
@@ -353,6 +452,8 @@ def collect(api, status, source, display=None, game_key=None):
                      "hook": (c.get("viral_hook_text") or "").replace("|", "/"),
                      "score": c.get("predicted_score", "—"),
                      "file": f"clip{n}.mp4", "caption": draft_caption(c)})
+        if c.get("big_moment"):
+            rows[-1]["hook"] = (rows[-1]["hook"] + " [" + c["big_moment"]["kind"] + "]").strip()
     write_md(folder, display or os.path.basename(source), rows)
     json.dump({"job_id": job_id, "source": source, "clips": [clips[i] for i in order]},
               open(os.path.join(folder, "clips.json"), "w"), indent=1, ensure_ascii=False)
@@ -385,6 +486,10 @@ def main():
     game = hide_flagged(video, is_url, GAME_FILE)
     if game:
         body["target_clips"] = GAME_CANDIDATES   # more candidates, keep the best 3 that show the game
+    elif not hide:
+        body["target_clips"] = TALK_CANDIDATES   # more candidates, keep only the big moments of conversations
+        if OPENSHORTS_HINT_FIELD:
+            body[OPENSHORTS_HINT_FIELD] = BIG_HINT
     display = None
     if hide:
         label = video if is_url else os.path.basename(video)
@@ -428,7 +533,7 @@ def main():
     log(f"job {jid} started")
     gk = key if game else None
     if not hide:
-        wait_and_collect(api, jid, video, quiet, game_key=gk)
+        wait_and_collect(api, jid, video, quiet, game_key=gk, big_key=None if game else key)
         return
     try:
         folder = wait_and_collect(api, jid, video, quiet, display, game_key=gk)
@@ -451,7 +556,7 @@ def upload(api, video):
     return slot["upload_id"]
 
 
-def wait_and_collect(api, jid, video, quiet, display=None, game_key=None):
+def wait_and_collect(api, jid, video, quiet, display=None, game_key=None, big_key=None):
     t0, last = time.time(), None
     while True:
         st = api.call("GET", f"/api/status/{jid}")
@@ -467,7 +572,7 @@ def wait_and_collect(api, jid, video, quiet, display=None, game_key=None):
             raise RuntimeError("job still running after 4 h")
         time.sleep(20)
     st["job_id"] = jid
-    folder = collect(api, st, video, display, game_key)
+    folder = collect(api, st, video, display, game_key, big_key)
     log(f"saved clips to {folder}")
     print(f"SAVED {folder}", flush=True)
     if not quiet:

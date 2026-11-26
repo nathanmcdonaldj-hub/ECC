@@ -2132,6 +2132,13 @@ def explain_clipper_line(line):
     if "gameplay:" in low and "no game play" in low:
         return ("A “Game play only” video had no moments that show the game (all desktop, web pages or chatting), so no clips were made.",
                 "Nothing to do. Try a video with more game play.")
+    if "bigmoment:" in low and "no big moment" in low:
+        name = line.split("no big moment found:", 1)[-1].strip()[:80] if "found:" in line else "a talking video"
+        return ("No big moment found in “{}”. It's a conversation with no gotcha, heated or big-laugh moment, so no clips were made.".format(name),
+                "Nothing to do. Try a different debate or podcast.")
+    if "bigmoment: check failed for every clip" in low:
+        return ("The big-moment check couldn't run (Gemini didn't answer), so no clips were made for this video.",
+                "Add the video again later, or ask Claude in your project chat.")
     if "gameplay: check failed" in low:
         return ("The game-play check couldn't run for one clip (Gemini didn't answer), so that clip was left out to be safe.",
                 "Nothing to do. If it keeps happening, ask Claude in your project chat.")
