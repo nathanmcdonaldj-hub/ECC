@@ -403,7 +403,7 @@ function empImg(id, sleep) {
 function faceImg(id) {
   return `<img class="face" src="${EMP_IMG(id)}" alt="" onerror="this.outerHTML='<span style=&quot;width:42px;display:inline-block&quot;>'+workerSVG(LOOKS['${id}'], false)+'</span>'">`;
 }
-const LANES = [["Clip line",["inbox","clipper","captions","desk"]],["Posting + results",["courier","tiktok","analyst","scout"]],["Books + UGC",["ugc","sales","manager"]]];
+const LANES = [["Clip line",["inbox","clipper","captions","desk"]],["Posting + results",["courier","analyst","scout"]],["Books + UGC",["ugc","sales","manager"]]];
 const STATUS = {ok:["var(--ok)","Working"],you:["var(--gold)","Waiting on you"],idle:["var(--sleep)","Quiet"],off:["var(--sleep)","Off shift"],error:["var(--bad)","Problem"]};
 
 /* ---------- render ---------- */
@@ -482,7 +482,7 @@ async function refresh() {
   }
   render();
   // Live-refresh only read-only stations, so nothing he's typing gets wiped.
-  if (["clipper","courier","analyst","tiktok","sales","captions","scout"].includes(openStation)) renderSheet(openStation, true);
+  if (["clipper","courier","analyst","sales","captions","scout"].includes(openStation)) renderSheet(openStation, true);
 }
 
 /* ---------- station sheets ---------- */
@@ -562,9 +562,10 @@ const SHEETS = {
       ${S.posts_limit ? `<span class="muted" style="font-size:12px">Each platform counts as one post. Upload-Post Basic ($24/mo) removes the limit and adds TikTok.</span>` : ""}</div>
     <h3>Scheduled</h3>
     ${S.clips_scheduled.length ? `<table><tr><th>Clip</th><th>Where</th><th>When</th><th></th></tr>${S.clips_scheduled.map(c => `<tr><td>${esc((c.caption || "").split("\n")[0].slice(0, 60))}</td><td>${c.platforms.map(p => p[0].toUpperCase() + p.slice(1)).join(", ")}</td><td>${esc(c.time_nice)}</td><td class="row">${c.posting ? `<span class="muted">⏳ Posting…</span>` : `<button class="btn sm go" data-postnow="${esc(c.id)}">Post now</button>`}<button class="btn sm" data-unsched="${esc(c.id)}">Back to desk</button></td></tr>`).join("")}</table>` : `<p class="muted">Nothing scheduled.</p>`}
+    ${S.tiktok.length ? `<h3>🎵 Waiting for TikTok (${S.tiktok.length})</h3>` + SHEETS.tiktokPart() : ""}
     <h3>Posted</h3>
     ${S.posted.length ? `<table><tr><th>Clip</th><th>When</th><th>Result</th></tr>${S.posted.map(c => `<tr><td>${esc((c.caption || "").split("\n")[0].slice(0, 60))}</td><td>${esc((c.posted_at || "").replace("T", " ").slice(0, 16))}</td><td>${c.status === "partial" ? "Some platforms failed" : "Posted"}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing posted yet.</p>`}`,
-  tiktok: () => S.tiktok.length ? (S.tiktok_auto ? `<div class="box"><b>${S.tiktok.length} clip(s) waiting for TikTok</b><div class="row"><button class="btn go" data-ttall="1">🚀 Post all to TikTok now</button></div></div>` : "") + S.tiktok.map(c => `<div class="box"><b>${esc((c.caption || "").split("\n")[0])}</b><span class="muted">Planned: ${esc(c.time_nice)}</span>
+  tiktokPart: () => S.tiktok.length ? (S.tiktok_auto ? `<div class="box"><b>${S.tiktok.length} clip(s) waiting for TikTok</b><div class="row"><button class="btn go" data-ttall="1">🚀 Post all to TikTok now</button></div></div>` : "") + S.tiktok.map(c => `<div class="box"><b>${esc((c.caption || "").split("\n")[0])}</b><span class="muted">Planned: ${esc(c.time_nice)}</span>
       <div class="row"><button class="btn go sm" data-copy="${esc(c.id)}">Copy caption</button><button class="btn sm" data-reveal="${esc(c.id)}">Show clip in Finder</button>
       <a class="btn sm" href="https://www.tiktok.com/upload" target="_blank" rel="noopener" style="text-decoration:none">Open TikTok upload</a><button class="btn sm" data-ttdone="${esc(c.id)}">I posted it</button></div></div>`).join("")
     : `<p class="muted">Nothing to post by hand. Clips with TikTok ticked show up here.</p>`,
@@ -723,10 +724,8 @@ const DEMO_STEPS = [
    "<b>“Nobody tells you this about your first $10k…”</b> #business #success #mindset", "Writing captions"],
   ["desk", "Your desk. Nothing posts until you press Approve. You pick the platform and time.",
    "Clip 1 <b>approved</b> for Instagram + YouTube · Friday 6:30 PM", "1 clip waiting on you"],
-  ["courier", "Posts your approved clips at the time you picked, through Upload-Post.",
-   "Clip 1 <b>posted</b> to Instagram + YouTube (demo only, nothing really posted)", "Posting clip 1"],
-  ["tiktok", "TikTok can't be posted automatically on the free plan, so this employee hands you the clip and copies the caption for you.",
-   "Caption <b>copied</b>. Open TikTok, add the clip, paste.", "Clip 1 ready for TikTok"],
+  ["courier", "Posts your approved clips at the time you picked to Instagram, YouTube and TikTok, through Upload-Post.",
+   "Clip 1 <b>posted</b> to Instagram + YouTube + TikTok (demo only, nothing really posted)", "Posting clip 1"],
   ["analyst", "Checks your views every 6 hours and tracks how close you are to getting paid.",
    "Clip 1: <b>1,240 views</b> · 38 likes · 6 shares", "Counting views"],
   ["scout", "Every night at 8:00 PM, shows what's going viral in your niches, with 3 video ideas and my ★ pick.",

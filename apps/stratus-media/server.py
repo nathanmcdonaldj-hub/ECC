@@ -1691,11 +1691,14 @@ def build_state(for_model=False):
         worker("desk", "Your Desk", st("Your Desk", "you" if waiting else "idle"),
                "{} clip(s) need Approve or Skip".format(len(waiting)) if waiting else "Nothing waiting on you",
                len(waiting)),
-        worker("courier", "Courier", st("Courier", "ok" if scheduled else "idle"),
-               "Next: {} · {}".format(", ".join(p.title() for p in next_post["platforms"] if p != "tiktok") or "TikTok only",
-                                      next_post["time_nice"]) if next_post else "No posts scheduled"),
-        worker("tiktok", "TikTok Runner", st("TikTok Runner", "you" if tiktok else "idle"),
-               "{} clip(s) for you to post".format(len(tiktok)) if tiktok else "Nothing to post by hand", len(tiktok)),
+        # The TikTok Runner was folded into the Courier on 2026-11-26 (TikTok posts by itself now).
+        worker("courier", "Courier", st("Courier", "ok" if (scheduled or tiktok) else "idle"),
+               "Next: {} · {}".format(", ".join({"tiktok": "TikTok", "youtube": "YouTube"}.get(p, p.title())
+                                                for p in next_post["platforms"]
+                                                if p != "tiktok" or CONFIG.get("tiktok_auto")) or "TikTok only",
+                                      next_post["time_nice"]) if next_post else
+               ("{} clip(s) waiting for TikTok".format(len(tiktok)) if tiktok else "No posts scheduled"),
+               len(tiktok) or None),
         worker("analyst", "Analyst", st("Analyst", "ok" if stats["fetched_at"] else "idle"),
                "{:,} views tracked".format(stats["views"]) if stats["views"] is not None else
                ("Numbers start after your first post" if not posted else "Collecting numbers")),
@@ -1799,7 +1802,7 @@ def background_loop():
                     rec["posted_at"] = now_iso()
                     persist()
                 if "tiktok" in rec.get("platforms", []) and not rec.get("tiktok_done") and not CONFIG.get("tiktok_auto"):
-                    notify_mac("Stratus House · TikTok Runner",
+                    notify_mac("Stratus House · Courier",
                                "Time to post clip {} on TikTok. Open the dashboard to copy the caption.".format(rec.get("num")))
             if trends_due():
                 threading.Thread(target=fetch_trends, daemon=True).start()
