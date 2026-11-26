@@ -3431,7 +3431,17 @@ HUNT_MIN_NO_FANS = {"youtube": 500000, "twitch": 10000, "kick": 10000, "rumble":
 HUNT_SOURCES = ("youtube", "twitch", "kick", "rumble", "reddit")   # Instagram blocks free search
 # Tested from his Mac 2026-11-26: Reddit wants a login (403 "network policy") and Rumble shows a Cloudflare
 # bot check, so both stay greyed out until a free way in exists. Their finders are kept for later.
-HUNT_BLOCKED = ("rumble", "reddit")
+HUNT_BLOCKED_ALWAYS = ("rumble",)
+
+
+def hunt_blocked():
+    """Reddit opens up once his free Reddit app keys are saved (the yellow Reddit box)."""
+    return HUNT_BLOCKED_ALWAYS + (() if reddit_keys_ok() else ("reddit",))
+
+
+def reddit_keys_ok():
+    sec = secrets()
+    return bool(sec.get("reddit_client_id") and sec.get("reddit_client_secret"))
 HUNT_NAMES = {"youtube": "YouTube", "twitch": "Twitch", "kick": "Kick", "rumble": "Rumble", "reddit": "Reddit"}
 WEB_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
@@ -3767,20 +3777,47 @@ def _num(x):
 
 
 # ---- Reddit (free JSON search: top video posts this week, then this month)
+_REDDIT = {"token": None, "exp": 0.0}
+REDDIT_UA = "macos:stratushouse.cliphunter:v1.0 (personal use)"
+
+
+def reddit_get(path, params):
+    """Reddit's free official API, read-only, with his own app keys (app-only login, no password needed)."""
+    sec = secrets()
+    cid, csec = sec.get("reddit_client_id"), sec.get("reddit_client_secret")
+    if not (cid and csec):
+        raise RuntimeError("no-reddit")
+    if not _REDDIT["token"] or time.time() > _REDDIT["exp"] - 300:
+        import base64
+        auth = base64.b64encode("{}:{}".format(cid, csec).encode()).decode()
+        req = urllib.request.Request("https://www.reddit.com/api/v1/access_token", method="POST",
+                                     data=urllib.parse.urlencode({"grant_type": "client_credentials"}).encode(),
+                                     headers={"Authorization": "Basic " + auth, "User-Agent": REDDIT_UA,
+                                              "Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                tok = json.loads(r.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError("reddit-auth:{}".format(exc.code))
+        if not tok.get("access_token"):
+            raise RuntimeError("reddit-auth:none")
+        _REDDIT["token"], _REDDIT["exp"] = tok["access_token"], time.time() + int(tok.get("expires_in", 3600))
+    req = urllib.request.Request("https://oauth.reddit.com" + path + "?" + urllib.parse.urlencode(params),
+                                 headers={"Authorization": "Bearer " + _REDDIT["token"], "User-Agent": REDDIT_UA})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            _REDDIT["token"] = None
+        raise RuntimeError("blocked:reddit-{}".format(exc.code))
+
+
 def reddit_candidates(prof):
     q = prof.get("subject") or prof["youtube_query"]
     out, seen = [], set()
     for t in ("week", "month"):
-        data = None
-        for host in ("https://www.reddit.com", "https://old.reddit.com"):
-            try:
-                data = web_get(host + "/search.json?" + urllib.parse.urlencode(
-                    {"q": q, "sort": "top", "t": t, "type": "link", "limit": 100, "raw_json": 1}))
-                break
-            except RuntimeError:
-                continue
-        if data is None:
-            raise RuntimeError("blocked:reddit")
+        data = reddit_get("/search", {"q": q, "sort": "top", "t": t, "type": "link", "limit": 100, "raw_json": 1})
         for ch in ((data.get("data") or {}).get("children") or []):
             p = ch.get("data") or {}
             if p.get("over_18") or p.get("id") in seen:
@@ -3928,7 +3965,7 @@ def rumble_candidates(prof):
 
 
 def hunt_platforms(h):
-    pl = [p for p in (h.get("platforms") or []) if p in HUNT_SOURCES and p not in HUNT_BLOCKED]
+    pl = [p for p in (h.get("platforms") or []) if p in HUNT_SOURCES and (p == "reddit" or p not in hunt_blocked())]
     if not pl and not h.get("platforms") and h.get("platform") in HUNT_SOURCES:
         pl = [h["platform"]]
     return pl
@@ -3987,8 +4024,9 @@ def run_hunter(manual=False):
                 except RuntimeError as exc:
                     code = str(exc)
                     notes[plat] = {"no-ytdlp": "the YouTube finder tool isn't installed yet",
-                                   "no-twitch": "needs its one-time setup (the yellow box)"}.get(
-                        code, "said no to the keys" if code.startswith("twitch-auth") else
+                                   "no-twitch": "needs its one-time setup (the yellow box)",
+                                   "no-reddit": "needs its one-time setup (the orange box)"}.get(
+                        code, "said no to the keys" if code.startswith(("twitch-auth", "reddit-auth")) else
                         ("blocked the search right now" if code.startswith("blocked") else "couldn't search right now"))
                     notes[plat] = name + " " + notes[plat]
                     continue
@@ -4106,7 +4144,7 @@ def hunter_public():
         "running": _HUNT["running"], "next": nxt, "items": h["items"][:30],
         "is_game": bool(prof.get("is_game")) if prof.get("subject") == h.get("subject") else None,
         "game_name": prof.get("game_name") if prof.get("subject") == h.get("subject") else None,
-        "has_twitch": all(twitch_keys()), "has_ytdlp": bool(find_ytdlp()),
+        "has_twitch": all(twitch_keys()), "has_ytdlp": bool(find_ytdlp()), "has_reddit": reddit_keys_ok(),
         "pending": len(hunter_pending()),
     }
 
@@ -4134,10 +4172,18 @@ def r_hunter_set(d):
             if h["on"]:
                 h["last_run"] = None   # run right away
         persist()
-    for f in ("twitch_client_id", "twitch_client_secret"):
+    for f in ("twitch_client_id", "twitch_client_secret", "reddit_client_id", "reddit_client_secret"):
         if str(d.get(f) or "").strip():
             save_secret(f, str(d[f]).strip())
             _HUNT["token"] = None
+            _REDDIT["token"] = None
+    if d.get("reddit_client_id") or d.get("reddit_client_secret"):
+        try:
+            reddit_get("/search", {"q": "dogs", "limit": 1})
+        except RuntimeError as exc:
+            return {"ok": False, "message": "Reddit didn't accept those codes. Check both and paste again." if "auth" in str(exc)
+                    else "Saved, but Reddit didn't answer right now ({}).".format(str(exc)[:40])}
+        return {"ok": True, "message": "Reddit is connected ✅"}
     if d.get("twitch_client_id") or d.get("twitch_client_secret"):
         try:
             twitch_get("games/top", {"first": 1})
