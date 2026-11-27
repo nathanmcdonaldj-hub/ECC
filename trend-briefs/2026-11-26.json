@@ -1,0 +1,64 @@
+{
+  "report": 5,
+  "date": "2026-11-26",
+  "generated_at": "2026-11-27T02:58:00Z",
+  "brief_url": "https://claude.ai/artifact/Rgsoo6L6GFFQZJ4FiHALvr",
+  "concerns": [
+    "#1 'mog' sound is someone's original audio; may be blocked on business accounts, Instagram and YouTube. Fall back to TikTok only plus a trending Reels sound.",
+    "AI dog in a gym will glitch (extra legs, warped weights); every frame is checked before approval.",
+    "Format numbers measured Nov 25; trend counts Nov 26."
+  ],
+  "ideas": [
+    {
+      "rank": 1,
+      "pick": true,
+      "niche": "Fitness + Dogs",
+      "title": "\"We felt the mog across the gym\"",
+      "length": "8-10 s",
+      "why": "246 creators, new ~Nov 18, Fresh (Virlo, Nov 26)",
+      "hook": "The only one who skipped the pie walking in Friday:",
+      "caption": "He had zero pie. Respect. Tag your gym buddy. #gymhumor #fitness #dogsoftiktok #blackfriday",
+      "sound": "\"We felt the mog across the gym\" (may be blocked outside personal TikTok)",
+      "post_time": "Fri Nov 27, 7-9 AM Phoenix (gym-goers back the morning after Thanksgiving)",
+      "build_plan": [
+        "AI visuals: sluggish gym, doors swing open, muscular bulldog in a lifting belt walks in slow motion",
+        "Cut to gym-goers turning their heads on the beat",
+        "Text: 'We felt the mog across the gym'. No voice; the sound carries it"
+      ]
+    },
+    {
+      "rank": 2,
+      "pick": false,
+      "niche": "Funny + Business",
+      "title": "\"Every small business owner on Black Friday when...\"",
+      "length": "7-10 s",
+      "why": "7x usual views, 14 accounts (Volume, Nov 25)",
+      "hook": "Every small business owner when someone asks for a code on top of the Black Friday price:",
+      "caption": "Small business owners, you know. Tag one. #smallbusiness #blackfriday #businessowner #relatable",
+      "sound": "AI voice + quiet suspense track from app library (business-safe)",
+      "post_time": "Fri Nov 27, 12-2 PM Phoenix (Black Friday lunch scrolling; repost Cyber Monday)",
+      "build_plan": [
+        "AI visuals: shop owner frozen behind the counter, thousand-yard stare, slow zoom, 5 s",
+        "Cut to a calculator showing '-$0.40 profit'",
+        "AI voice whispers: 'It's already 40% off, Linda.'"
+      ]
+    },
+    {
+      "rank": 3,
+      "pick": false,
+      "niche": "Success",
+      "title": "Series: \"Built in December, ep. 1\"",
+      "length": "20-30 s",
+      "why": "8x usual views, 11 accounts (Volume, Nov 25)",
+      "hook": "Welcome to Built in December, episode 1: why January is too late.",
+      "caption": "Episode 1 of 31. Follow so you don't miss tomorrow. #success #motivation #goals #builtindecember",
+      "sound": "AI voice + cinematic build from app library (safe everywhere)",
+      "post_time": "Tue Dec 1, 6-8 AM Phoenix (day-one posts land at the start of the day)",
+      "build_plan": [
+        "AI visuals: calendar flipping to Dec 1, city at dawn, desk lamp turning on",
+        "AI voice: 'Most people start in January. You'll have a 31-day lead. Today: write one goal and one daily action.'",
+        "Text: series title card + the day's one action, end on 'Follow for episode 2.'"
+      ]
+    }
+  ]
+}
