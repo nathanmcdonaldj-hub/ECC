@@ -8,7 +8,7 @@ Usage: python3 -I process_video.py <video_path_or_url> [--dry-run] [--quiet]
 - NEVER posts or schedules anything: it only calls upload, process and status.
 - Reads the Gemini key from ~/openshorts/autopilot-keys.env and never prints it.
 """
-import json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.request
+import json, math, os, re, shutil, struct, subprocess, sys, time, urllib.error, urllib.request
 
 API = "http://localhost:8000"
 HOME = os.path.expanduser("~")
@@ -85,6 +85,24 @@ REACTOR_TOOLS = ("reactor3.py", "reactor2.py")
 REACTOR_MANIFEST = os.path.join(REACTOR_DIR, "reactors.json")  # [{"id", "name", ...}]: the characters he approved
 REACTOR_ROOM = 2   # seconds kept free for the ~1.5 s intro, so intro + clip stays under 60 s
 
+# --- Stratus House "Words above the reactor" (added 2026-11-27) --------------
+# A template whose box sits at the bottom of the frame says so per character in reactors.json:
+#   "caption_bottom": the row (pixels of a 1920-tall frame) the burned-in words must end at
+#   "room":           seconds the template adds to a clip in total (intro + outro)
+# OpenShorts has no caption-height option, but every job keeps the clean clip, the exact .ass it
+# burned and the hook picture + position. So for those characters the clip is burned again from
+# these with the words higher, inside the backend container (the same ffmpeg, libass and fonts
+# OpenShorts used), and the reactor is added to that. OpenShorts itself is not changed.
+# No reactor picked, or a character without "caption_bottom": clips are exactly as before.
+# Fail-open: if the words can't be moved, the plain clip is kept (no reactor on top of the words).
+CAPTION_GAP = 0.116      # the lowest ink (commas, pop effect) ends this fraction of the font size above the style's bottom margin
+CAPTION_BAND = 200       # rows the words can fill above "caption_bottom" (one line, pop effect included)
+CONTAINER_FONTS = "/app/fonts"
+ASS_STYLE_FIELDS = ["name", "fontname", "fontsize", "primarycolour", "secondarycolour", "outlinecolour",
+                    "backcolour", "bold", "italic", "underline", "strikeout", "scalex", "scaley", "spacing",
+                    "angle", "borderstyle", "outline", "shadow", "alignment", "marginl", "marginr", "marginv",
+                    "encoding"]
+
 
 def log(*a):
     print(time.strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
@@ -149,6 +167,148 @@ def reactor_pick(video, is_url, path=None):
     else:
         c = {os.path.basename(str(k)): v for k, v in (d.get("files") or {}).items()}.get(os.path.basename(video))
     return c if c in reactor_ids() else None
+
+
+def reactor_info(character, path=None):
+    """The installed template's entry for one character ({} when there is none)."""
+    try:
+        with open(path or REACTOR_MANIFEST, encoding="utf-8") as fh:
+            for r in json.load(fh):
+                if isinstance(r, dict) and r.get("id") == character:
+                    return r
+    except (OSError, ValueError, TypeError):
+        pass
+    return {}
+
+
+def _number(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+
+
+def reactor_room(character, path=None):
+    """Whole seconds a clip must leave free for this character's intro + outro."""
+    room = _number(reactor_info(character, path).get("room"))
+    return REACTOR_ROOM if room is None else int(min(20, max(REACTOR_ROOM, math.ceil(room))))
+
+
+def caption_bottom(character, path=None):
+    """Row (of 1920) the words must end at for this character, or None to leave them where they are."""
+    v = _number(reactor_info(character, path).get("caption_bottom"))
+    return int(v) if v is not None and 400 <= v <= 1800 else None
+
+
+def lift_ass(text, bottom, frame_h=1920):
+    """The .ass text with its bottom-aligned styles' margin set so the words end at about row `bottom`.
+    None when no style could be changed. Mid-frame lines (split layout, {\\an5}) are not affected."""
+    m = re.search(r"^PlayResY:\s*(\d+)", text, re.M)
+    res_y = int(m.group(1)) if m and int(m.group(1)) > 0 else 288
+    fields, out, changed = ASS_STYLE_FIELDS, [], 0
+    for line in text.splitlines():
+        low = line.lower()
+        if low.startswith("format:") and "marginv" in low and "fontsize" in low:
+            fields = [f.strip().lower() for f in line.split(":", 1)[1].split(",")]
+        elif low.startswith("style:"):
+            vals = line.split(":", 1)[1].split(",")
+            try:
+                if len(vals) != len(fields):
+                    raise ValueError
+                size = float(vals[fields.index("fontsize")])
+                if int(vals[fields.index("alignment")]) in (1, 2, 3):
+                    margin = (frame_h - bottom) * res_y / frame_h - CAPTION_GAP * size
+                    vals[fields.index("marginv")] = str(int(max(0, round(margin))))
+                    line = line.split(":", 1)[0] + ":" + ",".join(vals)
+                    changed += 1
+            except ValueError:
+                pass
+        out.append(line)
+    return "\n".join(out) + "\n" if changed else None
+
+
+def png_size(path):
+    with open(path, "rb") as fh:
+        head = fh.read(24)
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("hook picture is not a PNG")
+    return struct.unpack(">II", head[16:24])
+
+
+def job_parts(job_dir, clip_file):
+    """What OpenShorts burned a finished clip from: (video to burn onto, .ass file, hook or None).
+    Names are relative to the job folder. Raises ValueError when they can't be told for sure."""
+    m = re.fullmatch(r"subtitled_(\d+)_(?:hooked_(\d+)_)?(.+)", clip_file)
+    if not m:
+        raise ValueError("this clip has no burned-in words")
+    sub_ts, hook_ts, clean = m.groups()
+    subs = [f for f in os.listdir(job_dir) if re.fullmatch(r"autosubs_" + sub_ts + r"_[^_/]+\.ass", f)]
+    if len(subs) != 1:
+        raise ValueError(f"found {len(subs)} caption files for this clip")
+    base, hook = clean, None
+    if hook_ts:
+        stem = f".hookrecipe_hooked_{hook_ts}_{clean}"
+        try:
+            with open(os.path.join(job_dir, stem + ".json"), encoding="utf-8") as fh:
+                r = json.load(fh)
+            w, h = png_size(os.path.join(job_dir, stem + ".png"))
+            hook = {"png": stem + ".png", "x": int(r["x"]), "y": int(r["y"]), "w": w, "h": h,
+                    "seconds": min(60.0, max(0.5, float(r.get("duration") or 5)))}
+        except OSError:
+            base = f"hooked_{hook_ts}_{clean}"   # older OpenShorts: the hook is already in this video
+        except (ValueError, KeyError, TypeError):
+            raise ValueError("the hook title's position couldn't be read")
+    if not os.path.isfile(os.path.join(job_dir, base)):
+        raise ValueError("the clip without words is no longer on disk")
+    return base, subs[0], hook
+
+
+def hook_row(hook, bottom):
+    """Row for the hook title: where OpenShorts put it, or just above the moved words if it would
+    reach into them (below the words is the reactor's box, so it never goes there)."""
+    top = bottom - CAPTION_BAND - 20
+    return max(0, top - hook["h"]) if hook["y"] + hook["h"] > top else hook["y"]
+
+
+def run_in_job(job_id, cmd, timeout=900):
+    """Run a command inside the backend container, in the job's own folder."""
+    p = subprocess.run([DOCKER, "exec", "-w", f"/app/output/{job_id}", BACKEND] + cmd,
+                       capture_output=True, text=True, timeout=timeout)
+    if p.returncode != 0:
+        raise RuntimeError(((p.stderr or "").strip().splitlines() or [f"code {p.returncode}"])[-1][:200])
+
+
+def raise_captions(job_id, clip_file, bottom, n):
+    """Burn a finished clip again with its words ending at row `bottom`. Returns the new file's path
+    (inside the job folder; the caller deletes it with drop_raised). Raises when it can't be done."""
+    job_dir = os.path.join(REPO, "output", job_id)
+    base, sub, hook = job_parts(job_dir, clip_file)
+    with open(os.path.join(job_dir, sub), encoding="utf-8", errors="replace") as fh:
+        lifted = lift_ass(fh.read(), bottom)
+    if not lifted:
+        raise ValueError("the caption file has no bottom style to move")
+    ass_name, out_name = f"_raised_{n}.ass", f"_raised_{n}.mp4"
+    with open(os.path.join(job_dir, ass_name), "w", encoding="utf-8") as fh:
+        fh.write(lifted)
+    graph = f"[0:v]ass=filename={ass_name}:fontsdir={CONTAINER_FONTS}[v]"
+    inputs = ["-i", "./" + base]
+    if hook:
+        graph = (f"[0:v]ass=filename={ass_name}:fontsdir={CONTAINER_FONTS}[c];"
+                 f"[c][1:v]overlay={hook['x']}:{hook_row(hook, bottom)}:"
+                 f"enable='between(t,0,{hook['seconds']:.2f})'[v]")
+        inputs += ["-i", "./" + hook["png"]]
+    run_in_job(job_id, ["ffmpeg", "-y", "-loglevel", "error"] + inputs +
+               ["-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
+                "-crf", "17", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", out_name])
+    out = os.path.join(job_dir, out_name)
+    if not os.path.isfile(out) or os.path.getsize(out) < 100000:
+        raise RuntimeError("the re-burned clip came out empty")
+    return out
+
+
+def drop_raised(job_id, n):
+    for name in (f"_raised_{n}.ass", f"_raised_{n}.mp4"):
+        try:
+            os.remove(os.path.join(REPO, "output", job_id, name))
+        except OSError:
+            pass
 
 
 def reactor_tool():
@@ -543,6 +703,7 @@ def collect(api, status, source, display=None, game_key=None, big_key=None, reac
     elif big_key:
         order = pick_big_moments(order, clips, job_id, big_key, os.path.basename(name).replace("_", " "))
     order = order[:TOP_N]
+    bottom = caption_bottom(reactor) if reactor else None
     folder = os.path.join(OUT_ROOT, safe_name(name))
     if os.path.exists(folder):
         folder += time.strftime(" %Y-%m-%d %H%M")
@@ -557,7 +718,19 @@ def collect(api, status, source, display=None, game_key=None, big_key=None, reac
             raise RuntimeError(f"clip file missing on disk: {src}")
         dest = os.path.join(folder, f"clip{n}.mp4")
         # with a reactor the clip lands in Clips Ready already finished, never as a plain clip first
-        if reactor and reactor_render(reactor, src, dest, os.path.basename(name)):
+        added = False
+        if reactor:
+            label, base = os.path.basename(name), src
+            try:
+                if bottom:   # his box sits at the bottom: the words go just above it first
+                    base = raise_captions(job_id, clip_file, bottom, n)
+                added = reactor_render(reactor, base, dest, label)
+            except Exception as e:
+                log(f"REACTOR: failed to move the words above him on clip {n}, kept the plain clip: "
+                    f"{label} ({str(e)[:200]})")
+            finally:
+                drop_raised(job_id, n)
+        if added:
             log(f"REACTOR: {reactor} added to clip {n}: {os.path.basename(name)}")
         else:
             shutil.copy2(src, dest)
@@ -604,7 +777,7 @@ def main():
     game = hide_flagged(video, is_url, GAME_FILE)
     reactor = reactor_pick(video, is_url)
     if reactor:
-        body["clip_max_seconds"] = 59 - REACTOR_ROOM
+        body["clip_max_seconds"] = 59 - reactor_room(reactor)
     if game:
         body["target_clips"] = GAME_CANDIDATES   # more candidates, keep the best 3 that show the game
     elif not hide:

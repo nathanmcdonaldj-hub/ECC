@@ -75,3 +75,27 @@ listed in the installed template's `reactors.json`). The pick is saved in
 - Fail-open: if the step can't run, the plain clip is kept and the log line starts with
   `REACTOR: failed`, which the dashboard shows in plain words.
 - With "Hide the streamer" on, the reactor is added after the voice-removal step.
+
+### Words above the reactor (2026-11-27)
+
+Mr. McDonald asked for the reactor at the bottom of the frame with the clip's words above him.
+The words are burned in by OpenShorts (`"captions": true`), at a fixed height (`MarginV=43` of
+`PlayResY 288`, rows ~1450 to 1607 of 1920) that no API option or setting can change. OpenShorts was
+still **not** edited. Instead, a character in `reactors.json` can carry:
+
+- `"caption_bottom"`: the row (of a 1920-tall frame) the words must end at, for example `1280`
+- `"room"`: seconds the template adds to a clip in total (intro + outro); clips are capped at
+  `59 - room` (2 s when not stated)
+
+For such a character each picked clip is burned again before the reactor step, from what the job
+keeps in `~/openshorts/output/<job>/`: the clean clip (`<name>_clip_N.mp4`), the exact caption file
+(`autosubs_<ts>_<id>.ass`, bottom style margin raised) and the hook title picture + position
+(`.hookrecipe_hooked_<ts>_<clip>.png/.json`). It runs with `docker exec -w /app/output/<job>
+openshorts-backend ffmpeg ...`, so it uses the same ffmpeg, libass and `/app/fonts` as the original.
+
+- Split-screen stretches already put the words mid-frame (`{\an5}`); those are left alone.
+- A hook title that would reach into the moved words is put just above them.
+- No reactor, or a character without `caption_bottom`: clips are exactly as OpenShorts made them.
+- "Hide the streamer" videos have no burned-in words, so nothing is moved there.
+- Fail-open: if the words can't be moved, the plain clip is kept without the reactor (he would
+  cover the words) and the log line starts with `REACTOR: failed to move the words`.
