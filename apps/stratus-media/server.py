@@ -2447,12 +2447,15 @@ def r_tiktok_post_all(d):
 
 def r_record_post(d):
     """Show a video that was posted outside the Approve flow (e.g. a finished skit posted
-    straight through Upload-Post) in Live Posts, with its links and numbers."""
+    straight through Upload-Post) in Live Posts, with its links and numbers.
+    Fields: file, platforms, caption, source, posted_at, request_ids, urls, key (optional)."""
     f = d.get("file") or ""
     plats = [p for p in (d.get("platforms") or []) if p in ("instagram", "youtube", "tiktok")]
     if not os.path.isfile(f) or not plats:
         return {"ok": False, "message": "Need the video file and at least one platform."}
-    cid = "outside/" + os.path.basename(f)
+    # "key" keeps a second post of the same file (a repost) as its own Live Posts card
+    key = re.sub(r"[^\w .()\-]", "", str(d.get("key") or "")).strip()[:80]
+    cid = "outside/" + (key or os.path.basename(f))
     ff = find_ffmpeg()
     thumb = os.path.splitext(f)[0] + ".jpg"
     if ff and not os.path.exists(thumb):
