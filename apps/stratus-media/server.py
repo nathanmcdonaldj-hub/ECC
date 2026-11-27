@@ -458,10 +458,12 @@ def scan_clips():
         for cid, info in found.items():
             rec = STATE["clips"].get(cid)
             if rec is None:
+                # our own finished videos ("Stratus House ...") already carry their music and end tag
+                finished = os.path.basename(info["file"]).lower().startswith("stratus house")
                 rec = {"status": "new", "caption": "", "hashtags": "",
                        "platforms": list(auto_platforms()),
                        "time": suggest_time(sum(1 for r in STATE["clips"].values() if r.get("status") in ("new", "ready"))),
-                       "why": "", "music": "auto", "added": now_iso()}
+                       "why": "", "music": "none" if finished else "auto", "added": now_iso()}
                 STATE["clips"][cid] = rec
             elif rec.get("status") == "skipped" and info["mtime"] > (rec.get("mtime") or 0) + 5:
                 # same name, but a freshly re-made file: treat it as a new clip
@@ -2497,6 +2499,9 @@ def r_set_caption(d):
         rec["hashtags"] = (d.get("hashtags") or "").strip()
         if "yt_title" in d:
             rec["yt_title"] = (d.get("yt_title") or "").strip()
+        if "music" in d:  # "none" for finished videos that already have their own sound
+            rec["music"] = d.get("music") or "none"
+            rec.pop("music_file", None)
         rec["platforms"] = list(dict.fromkeys((rec.get("platforms") or []) + list(auto_platforms())))
         if not rec.get("time"):
             rec["time"] = suggest_time(0)
