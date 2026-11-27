@@ -1,0 +1,20 @@
+[
+ {
+  "id": "studio-host",
+  "name": "Studio Host",
+  "thumb": "assets/studio-host-thumb.jpg",
+  "intro": "studio-host-intro.mp4",
+  "intro_crop": [
+   192,
+   0,
+   704
+  ],
+  "loop": "studio-host-loop.mp4",
+  "loop_crop": [
+   174,
+   87,
+   612
+  ],
+  "audio_shift": 0.1
+ }
+]
