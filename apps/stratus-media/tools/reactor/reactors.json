@@ -11,9 +11,9 @@
   ],
   "loop": "studio-host-loop.mp4",
   "loop_crop": [
-   174,
-   87,
-   612
+   154,
+   60,
+   640
   ],
   "audio_shift": 0.1
  }

@@ -88,7 +88,7 @@ def main():
 
         dint = duration(intro)
         di = dint + 0.25
-        l0 = os.path.join(tmp, "loop0.png")   # first loop frame: the opening dissolves into it, so the switch is smooth
+        l0 = os.path.join(tmp, "loop0.png")   # first loop frame: clean cut to it when he finishes the line (a dissolve ghosts two faces)
         run(["-i", loop, "-frames:v", "1", l0])
         ox, oy, ix, iy = BX - 20, BY - 20, BX + BORDER, BY + BORDER
 
@@ -96,7 +96,7 @@ def main():
         op = os.path.join(tmp, "open.mp4")
         fc = (f"[0:v]fps={FPS},setsar=1,format=rgba[bg];" + box_chain("1:v", c["intro_crop"], "I") + ";"
               "[2:v]format=gray,split[Im][Jm];" + box_chain("5:v", c["loop_crop"], "J") + ";"
-              f"[J]fade=in:st={dint - 0.1:.3f}:d=0.3:alpha=1[Jf];"
+              f"[J]fade=in:st={dint:.3f}:d=0.04:alpha=1[Jf];"
               f"[bg][I]overlay={ix}:{iy}:eof_action=repeat[b0];[b0][Jf]overlay={ix}:{iy}[b1];[b1][3:v]overlay={ox}:{oy}[b2];"
               f"[4:v]format=rgba,fade=in:st=0:d=0.2:alpha=1[t];[b2][t]overlay=(W-w)/2:{TITLE_Y},format=yuv420p[v];"
               f"[1:a]atrim=start={c.get('audio_shift', 0):.3f},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,apad[a]")
