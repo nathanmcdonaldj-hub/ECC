@@ -1,63 +1,63 @@
 {
-  "report": 4,
-  "date": "2026-11-25",
-  "generated_at": "2026-11-26T02:58:00Z",
+  "report": 5,
+  "date": "2026-11-26",
+  "generated_at": "2026-11-27T02:58:00Z",
   "brief_url": "https://claude.ai/artifact/Rgsoo6L6GFFQZJ4FiHALvr",
   "concerns": [
-    "#1 sound is someone's original audio; may be blocked on business accounts, Instagram and YouTube. Fall back to TikTok only plus a trending Reels sound.",
-    "AI dogs glitch (extra legs, melting paws); every frame of #1 and #2 is checked before approval.",
-    "Multipliers come from 9-13 accounts per format."
+    "#1 'mog' sound is someone's original audio; may be blocked on business accounts, Instagram and YouTube. Fall back to TikTok only plus a trending Reels sound.",
+    "AI dog in a gym will glitch (extra legs, warped weights); every frame is checked before approval.",
+    "Format numbers measured Nov 25; trend counts Nov 26."
   ],
   "ideas": [
     {
       "rank": 1,
       "pick": true,
-      "niche": "Funny + Dogs",
-      "title": "\"Everybody's at Thanksgiving except me\"",
+      "niche": "Fitness + Dogs",
+      "title": "\"We felt the mog across the gym\"",
       "length": "8-10 s",
-      "why": "#1 trend on Virlo: 477 creators, +47,600% (Nov 25)",
-      "hook": "In this house everybody gets turkey except me...",
-      "caption": "He had a plan all along. Tag a dog owner. #thanksgiving #dogsoftiktok #funnydog #dogsofinstagram",
-      "sound": "\"In this town everybody goes out partying except me\" (may be blocked outside personal TikTok)",
-      "post_time": "Thu Nov 26, 5-7 PM Phoenix (post-dinner couch scrolling; dead by Saturday)",
+      "why": "246 creators, new ~Nov 18, Fresh (Virlo, Nov 26)",
+      "hook": "The only one who skipped the pie walking in Friday:",
+      "caption": "He had zero pie. Respect. Tag your gym buddy. #gymhumor #fitness #dogsoftiktok #blackfriday",
+      "sound": "\"We felt the mog across the gym\" (may be blocked outside personal TikTok)",
+      "post_time": "Fri Nov 27, 7-9 AM Phoenix (gym-goers back the morning after Thanksgiving)",
       "build_plan": [
-        "AI visuals: sad golden retriever at a window, blurred dinner party behind, 5 s",
-        "Cut on the beat to the same dog asleep on a carved-up turkey, 3 s",
-        "Text: '...so I made other plans.' No voice; the trend sound carries it"
+        "AI visuals: sluggish gym, doors swing open, muscular bulldog in a lifting belt walks in slow motion",
+        "Cut to gym-goers turning their heads on the beat",
+        "Text: 'We felt the mog across the gym'. No voice; the sound carries it"
       ]
     },
     {
       "rank": 2,
       "pick": false,
-      "niche": "Dogs",
-      "title": "5 things before your dog turns 2",
-      "length": "15-20 s",
-      "why": "14x usual views, 13 accounts (Volume, Nov 24)",
-      "hook": "5 things to do with your 1-year-old dog before they turn 2.",
-      "caption": "Save this before the birthday. Which one are you missing? #dogtraining #puppytips #dogsoftiktok #dogmom",
-      "sound": "Light happy track from app library (safe everywhere)",
-      "post_time": "Sun Nov 29, 9-11 AM Phoenix (weekend dog-owner saves)",
+      "niche": "Funny + Business",
+      "title": "\"Every small business owner on Black Friday when...\"",
+      "length": "7-10 s",
+      "why": "7x usual views, 14 accounts (Volume, Nov 25)",
+      "hook": "Every small business owner when someone asks for a code on top of the Black Friday price:",
+      "caption": "Small business owners, you know. Tag one. #smallbusiness #blackfriday #businessowner #relatable",
+      "sound": "AI voice + quiet suspense track from app library (business-safe)",
+      "post_time": "Fri Nov 27, 12-2 PM Phoenix (Black Friday lunch scrolling; repost Cyber Monday)",
       "build_plan": [
-        "AI visuals: 5 shots of a young dog (new trail, calm dog meet, car ride, learning 'wait', vet visit), 3 s each",
-        "AI voice: warm read of each item",
-        "Text: big number + one line per shot"
+        "AI visuals: shop owner frozen behind the counter, thousand-yard stare, slow zoom, 5 s",
+        "Cut to a calculator showing '-$0.40 profit'",
+        "AI voice whispers: 'It's already 40% off, Linda.'"
       ]
     },
     {
       "rank": 3,
       "pick": false,
-      "niche": "Business",
-      "title": "Black Friday discount script",
-      "length": "12-15 s",
-      "why": "20x usual views, 9 accounts (Volume, Nov 24)",
-      "hook": "When a customer asks for a Black Friday discount, say this exact sentence.",
-      "caption": "Protect your price. Save this for tomorrow. #blackfriday #smallbusiness #salestips #entrepreneur",
-      "sound": "AI voice + quiet beat from app library (business-safe)",
-      "post_time": "Thu Nov 26, 7-9 PM Phoenix (owners prepping the night before Black Friday)",
+      "niche": "Success",
+      "title": "Series: \"Built in December, ep. 1\"",
+      "length": "20-30 s",
+      "why": "8x usual views, 11 accounts (Volume, Nov 25)",
+      "hook": "Welcome to Built in December, episode 1: why January is too late.",
+      "caption": "Episode 1 of 31. Follow so you don't miss tomorrow. #success #motivation #goals #builtindecember",
+      "sound": "AI voice + cinematic build from app library (safe everywhere)",
+      "post_time": "Tue Dec 1, 6-8 AM Phoenix (day-one posts land at the start of the day)",
       "build_plan": [
-        "AI visuals: small shop counter or phone with customer message, 4 s",
-        "AI voice reads: 'This is already our best value. What I can do is add [bonus] if you order today.'",
-        "Text: the script in large type, end on 'Save this for tomorrow.'"
+        "AI visuals: calendar flipping to Dec 1, city at dawn, desk lamp turning on",
+        "AI voice: 'Most people start in January. You'll have a 31-day lead. Today: write one goal and one daily action.'",
+        "Text: series title card + the day's one action, end on 'Follow for episode 2.'"
       ]
     }
   ]
