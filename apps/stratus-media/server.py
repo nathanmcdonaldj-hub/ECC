@@ -49,6 +49,7 @@ DEFAULT_CONFIG = {
     "upload_post_monthly_limit": 10,   # 0 = unlimited (Upload-Post Basic)
     "tiktok_auto": False,              # True = Upload-Post posts to TikTok too (Basic plan)
     "end_tag": True,                   # his OK 2026-11-24: 2 s liquid-gold SH tag on the end of every clip
+    "reactor": False,                  # reactor picker in the Inbox Clerk; on once the character + his voice are approved
     # Clipping hours: weekdays from market close until morning, weekends all day.
     "clip_weekday_open": "14:30",
     "clip_close": "06:30",
@@ -373,8 +374,9 @@ def reactor_voice():
 
 
 def reactor_ready():
-    """The reactor can be added: the renderer is installed and his voice recording is in."""
-    return os.path.exists(REACTOR_TOOL) and bool(reactor_voice())
+    """The reactor can be added: switched on (config "reactor", off until he has OK'd the character),
+    the renderer is installed and his voice recording is in."""
+    return bool(CONFIG.get("reactor")) and os.path.exists(REACTOR_TOOL) and bool(reactor_voice())
 
 
 def reactor_flags():
