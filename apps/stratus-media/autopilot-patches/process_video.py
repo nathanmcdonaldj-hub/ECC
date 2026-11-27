@@ -289,10 +289,10 @@ def raise_captions(job_id, clip_file, bottom, n):
         fh.write(lifted)
     graph = f"[0:v]ass=filename={ass_name}:fontsdir={CONTAINER_FONTS}[v]"
     inputs = ["-i", "./" + base]
-    if hook:
-        graph = (f"[0:v]ass=filename={ass_name}:fontsdir={CONTAINER_FONTS}[c];"
-                 f"[c][1:v]overlay={hook['x']}:{hook_row(hook, bottom)}:"
-                 f"enable='between(t,0,{hook['seconds']:.2f})'[v]")
+    if hook:   # same order as OpenShorts: hook title first, the words burned over it
+        graph = (f"[0:v][1:v]overlay={hook['x']}:{hook_row(hook, bottom)}:"
+                 f"enable='between(t,0,{hook['seconds']:.2f})',"
+                 f"ass=filename={ass_name}:fontsdir={CONTAINER_FONTS}[v]")
         inputs += ["-i", "./" + hook["png"]]
     run_in_job(job_id, ["ffmpeg", "-y", "-loglevel", "error"] + inputs +
                ["-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
