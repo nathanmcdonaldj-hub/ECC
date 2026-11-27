@@ -53,3 +53,22 @@ by exact URL and files match by basename.
 One added line: exit code **75** from process_video.py means "hiding failed".
 The item is not added to `processed.txt`, so it is retried on the next run.
 Everything else is unchanged.
+
+## Reactor (2026-11-27)
+
+The dashboard's Inbox Clerk lets Mr. McDonald pick a reactor for a video (None, Studio Host, Felt
+Puppet, Gold Mask). The pick is saved in `~/Movies/Clip Inbox/reactor.json`
+(`{"links": {url: character}, "files": {name: character}}`).
+
+- For a picked video, clips are capped at 56 s so the ~2 s intro keeps them under 60 s.
+- Each finished clip (captions already burned in) is run through
+  `~/stratus-media/tools/reactor/reactor.py` before it lands in Clips Ready: the reactor says
+  "Check this out" in his own voice, then sits in a corner box. Music and the end tag are still
+  added later by the dashboard.
+- The voice is ONE reusable recording at
+  `~/Library/Application Support/StratusMedia/reactor/voice.<m4a|wav|mp3>`. Without it the picker is
+  greyed out and no reactor is added.
+- Needs a Python with Pillow and the dashboard's ffmpeg (`~/stratus-media/bin/ffmpeg`).
+- Fail-open: if the step can't run, the plain clip is kept and the log line starts with
+  `REACTOR: failed`, which the dashboard shows in plain words.
+- With "Hide the streamer" on, the reactor is added after the voice-removal step.

@@ -351,10 +351,55 @@ def set_hide(kind, value, on, fname=HIDE_FILE):
         pass
 
 
+# Reactor character (2026-11-27): picked per video when it is added. Read by the clipping pipeline from
+# Clip Inbox/reactor.json: {"links": {url: character}, "files": {name: character}}.
+REACTOR_FILE = "reactor.json"
+REACTORS = {"studio-host": "Studio Host", "felt-puppet": "Felt Puppet", "gold-mask": "Gold Mask"}
+REACTOR_TOOL = os.path.join(APP_DIR, "tools", "reactor", "reactor.py")
+REACTOR_VOICE_DIR = os.path.join(DATA_DIR, "reactor")
+REACTOR_VOICE_EXT = (".m4a", ".wav", ".mp3", ".aac", ".caf", ".mp4")
+
+
+def reactor_voice():
+    """His one reusable "Check this out" recording (voice.m4a, voice.wav, ...), or None."""
+    try:
+        names = sorted(os.listdir(REACTOR_VOICE_DIR))
+    except OSError:
+        return None
+    for n in names:
+        if n.lower().startswith("voice.") and n.lower().endswith(REACTOR_VOICE_EXT):
+            return os.path.join(REACTOR_VOICE_DIR, n)
+    return None
+
+
+def reactor_ready():
+    """The reactor can be added: the renderer is installed and his voice recording is in."""
+    return os.path.exists(REACTOR_TOOL) and bool(reactor_voice())
+
+
+def reactor_flags():
+    d = load_json(os.path.join(CONFIG["clip_inbox"], REACTOR_FILE), {})
+    return {"links": dict(d.get("links") or {}), "files": dict(d.get("files") or {})}
+
+
+def set_reactor(kind, value, character):
+    """Remember (or clear, with character None) the reactor picked for one inbox item."""
+    d = reactor_flags()
+    key = "links" if kind == "link" else "files"
+    d[key].pop(value, None)
+    if character in REACTORS:
+        d[key][value] = character
+    try:
+        save_json(os.path.join(CONFIG["clip_inbox"], REACTOR_FILE), d)
+    except OSError:
+        pass
+
+
 def list_inbox():
     inbox = CONFIG["clip_inbox"]
     hide = hide_flags()
     game = hide_flags(GAMEPLAY_FILE)
+    reactor = reactor_flags()
     processed = set()
     for name in ("processed.txt",):
         for base in (inbox, os.path.join(CONFIG["openshorts_dir"], "autopilot")):
@@ -378,6 +423,7 @@ def list_inbox():
                 if name in processed or full in processed:
                     continue
                 items.append({"kind": "video", "name": name, "hide": name in hide["files"], "game": name in game["files"],
+                              "reactor": REACTORS.get(reactor["files"].get(name)),
                               "size_mb": round(os.path.getsize(full) / 1e6, 1)})
     except OSError:
         pass
@@ -386,7 +432,8 @@ def list_inbox():
             for line in fh:
                 url = line.strip()
                 if url and not url.startswith("#") and url not in processed:
-                    items.append({"kind": "link", "name": url, "hide": url in hide["links"], "game": url in game["links"]})
+                    items.append({"kind": "link", "name": url, "hide": url in hide["links"], "game": url in game["links"],
+                                  "reactor": REACTORS.get(reactor["links"].get(url))})
     except OSError:
         pass
     return items
@@ -1574,7 +1621,7 @@ def write_captions(force_ids=None):
 
 # ---------------------------------------------------------------- actions
 
-def add_link(url, hide=False, game=False):
+def add_link(url, hide=False, game=False, reactor=None):
     url = (url or "").strip()
     if not re.match(r"^https?://\S+$", url):
         return False, "That doesn't look like a video link."
@@ -1587,13 +1634,16 @@ def add_link(url, hide=False, game=False):
             set_hide("link", url, True)
         if game:
             set_hide("link", url, True, GAMEPLAY_FILE)
+        reactor = reactor if (reactor in REACTORS and reactor_ready()) else None
+        set_reactor("link", url, reactor)
     except OSError as exc:
         raise_error("Inbox Clerk", "Couldn't save the link",
                     "Writing to Movies → Clip Inbox failed ({}).".format(exc),
                     "Ask Claude in your project chat to check the Clip Inbox folder.", key="inbox:write")
         return False, "Couldn't save it."
     return True, "Queued for the next clipping run." + (" The streamer's face and voice will be hidden." if hide else "") \
-        + (" Only game play moments will be clipped." if game else "")
+        + (" Only game play moments will be clipped." if game else "") \
+        + (" {} will be added to its clips.".format(REACTORS[reactor]) if reactor else "")
 
 
 def write_redo(rec, note):
@@ -1724,6 +1774,8 @@ def build_state(for_model=False):
         "gate": gate_public(),
         "inbox": inbox,
         "hide_ready": hide_ready(),
+        "reactor_ready": reactor_ready(),
+        "reactors": [{"id": k, "name": v} for k, v in REACTORS.items()],
         "clips_waiting": waiting,
         "clips_scheduled": scheduled,
         "tiktok": tiktok,
@@ -2148,6 +2200,12 @@ def explain_clipper_line(line):
     if "gameplay: check failed" in low:
         return ("The game-play check couldn't run for one clip (Gemini didn't answer), so that clip was left out to be safe.",
                 "Nothing to do. If it keeps happening, ask Claude in your project chat.")
+    if "reactor:" in low and "no voice recording" in low:
+        return ("A video had a reactor picked, but your “Check this out” recording isn't in yet, so its clips were made without him.",
+                "Send Claude your “Check this out” voice memo in the project chat.")
+    if "reactor:" in low:
+        return ("The reactor couldn't be added to a clip, so that clip was made without him.",
+                "Nothing to do. If it keeps happening, ask Claude in your project chat.")
     if "hide:" in low and "fills the screen" in low:
         return ("A video with “Hide the streamer” on was skipped: the streamer fills the whole screen, so he can't be hidden.",
                 "Nothing to do. Pick videos where he's in a small webcam box, or turn Hide off for that one.")
@@ -2350,14 +2408,21 @@ class Handler(BaseHTTPRequestHandler):
             set_hide("file", name, True)
         if kind == "video" and (q.get("game") or [""])[0] == "1":
             set_hide("file", name, True, GAMEPLAY_FILE)
+        picked = None
+        if kind == "video":
+            picked = (q.get("reactor") or [""])[0]
+            picked = picked if (picked in REACTORS and reactor_ready()) else None
+            set_reactor("file", name, picked)
         return self.send_json({"ok": True, "path": dest, "name": name,
-                               "message": "Added to the Clip Inbox. It's clipped on the next run." if kind == "video" else "Saved."})
+                               "message": ("Added to the Clip Inbox. It's clipped on the next run."
+                                           + (" {} will be added to its clips.".format(REACTORS[picked]) if picked else ""))
+                               if kind == "video" else "Saved."})
 
 
 # ---------------------------------------------------------------- route handlers
 
 def r_link(d):
-    ok, msg = add_link(d.get("url"), bool(d.get("hide")), bool(d.get("game")))
+    ok, msg = add_link(d.get("url"), bool(d.get("hide")), bool(d.get("game")), d.get("reactor") or None)
     return {"ok": ok, "message": msg}
 
 
@@ -4227,6 +4292,7 @@ def r_hunter_remove(d):
                 fh.writelines(l for l in lines if l.strip() != url)
             set_hide("link", url, False)
             set_hide("link", url, False, GAMEPLAY_FILE)
+            set_reactor("link", url, None)
             cancelled = True
         except OSError:
             pass

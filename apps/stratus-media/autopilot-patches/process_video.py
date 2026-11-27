@@ -71,6 +71,19 @@ BIG_PROMPT = ("You get the audio of one short clip (under 60 s) and {n} frames f
 # If OpenShorts' /api/process takes a free-text focus for picking moments, set its field name here.
 OPENSHORTS_HINT_FIELD = None
 
+# --- Stratus House "Reactor" (added 2026-11-27) ------------------------------
+# The dashboard notes the reactor picked for a source in ~/Movies/Clip Inbox/reactor.json
+# ({"links": {url: character}, "files": {name: character}}). Each finished clip (captions already
+# burned in) then opens with the reactor saying "Check this out" in Mr. McDonald's own voice and
+# keeps him in a corner box while the clip plays. Music and the end tag are added later by the
+# dashboard. Fail-open: if the step can't run, the plain clip is kept and the log says why.
+REACTOR_FILE = os.path.join(HOME, "Movies", "Clip Inbox", "reactor.json")
+REACTOR_TOOL = os.path.join(HOME, "stratus-media", "tools", "reactor", "reactor.py")
+REACTOR_VOICE_DIR = os.path.join(HOME, "Library", "Application Support", "StratusMedia", "reactor")
+REACTOR_VOICE_EXT = (".m4a", ".wav", ".mp3", ".aac", ".caf", ".mp4")
+REACTORS = ("studio-host", "felt-puppet", "gold-mask")
+REACTOR_ROOM = 3   # seconds kept free for the intro, so intro + clip stays under 60 s
+
 
 def log(*a):
     print(time.strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
@@ -111,6 +124,93 @@ def hide_flagged(video, is_url, path=HIDE_FILE):
     if is_url:
         return video.strip() in [str(u).strip() for u in (d.get("links") or [])]
     return os.path.basename(video) in [os.path.basename(str(f)) for f in (d.get("files") or [])]
+
+
+def reactor_pick(video, is_url, path=REACTOR_FILE):
+    """The reactor character picked for this source on the dashboard, or None."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if is_url:
+        c = (d.get("links") or {}).get(video.strip())
+    else:
+        c = {os.path.basename(str(k)): v for k, v in (d.get("files") or {}).items()}.get(os.path.basename(video))
+    return c if c in REACTORS else None
+
+
+def reactor_voice():
+    """His one reusable "Check this out" recording (voice.m4a, voice.wav, ...), or None."""
+    try:
+        names = sorted(os.listdir(REACTOR_VOICE_DIR))
+    except OSError:
+        return None
+    for n in names:
+        if n.lower().startswith("voice.") and n.lower().endswith(REACTOR_VOICE_EXT):
+            return os.path.join(REACTOR_VOICE_DIR, n)
+    return None
+
+
+_REACTOR_PY = []
+
+
+def reactor_python():
+    """A Python that has Pillow (this script runs with -I, so user packages aren't visible here)."""
+    if not _REACTOR_PY:
+        found = None
+        for py in (sys.executable, "/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"):
+            try:
+                if py and subprocess.run([py, "-c", "import PIL"], capture_output=True, timeout=30).returncode == 0:
+                    found = py
+                    break
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+        _REACTOR_PY.append(found)
+    return _REACTOR_PY[0]
+
+
+def reactor_render(character, src, dest, label):
+    """Write `dest` = `src` with the reactor intro + corner box. Returns True when it worked."""
+    voice, py = reactor_voice(), None
+    if not voice:
+        log(f"REACTOR: failed, no voice recording yet: {label}")
+        return False
+    if os.path.exists(REACTOR_TOOL):
+        py = reactor_python()
+    if not py:
+        log(f"REACTOR: failed, the reactor tool isn't set up on this Mac: {label}")
+        return False
+    tmp = os.path.join(os.path.dirname(dest), "." + os.path.basename(dest)[:-4] + ".reactor.mp4")
+    env = dict(os.environ, PATH=os.path.dirname(HOST_FFMPEG) + os.pathsep + os.environ.get("PATH", ""))
+    err = ""
+    try:
+        p = subprocess.run([py, REACTOR_TOOL, "--character", character, "--clip", src, "--voice", voice,
+                            "--out", tmp], capture_output=True, text=True, timeout=1200, env=env)
+        ok = p.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 100000
+        err = (p.stderr or "").strip().splitlines()[-1][:200] if (p.stderr or "").strip() else f"code {p.returncode}"
+    except (OSError, subprocess.TimeoutExpired) as e:
+        ok, err = False, str(e)[:200]
+    if not ok:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        log(f"REACTOR: failed on {os.path.basename(dest)}, kept the plain clip: {label} ({err})")
+        return False
+    os.replace(tmp, dest)
+    return True
+
+
+def add_reactor(folder, character, label):
+    """Put the reactor on every finished clip in a Clips Ready folder (used after the hide steps)."""
+    done = 0
+    for f in sorted(os.listdir(folder)):
+        if re.fullmatch(r"clip\d+\.mp4", f):
+            path = os.path.join(folder, f)
+            done += 1 if reactor_render(character, path, path, label) else 0
+    log(f"REACTOR: {character} added to {done} clip(s): {label}")
+    return done
 
 
 def docker_run(args, timeout=4 * 3600):
@@ -402,7 +502,7 @@ def thumbnail(clip_host_path, job_id, clip_file, dest):
     shutil.move(os.path.join(REPO, "output", job_id, os.path.basename(tmp)), dest)
 
 
-def collect(api, status, source, display=None, game_key=None, big_key=None):
+def collect(api, status, source, display=None, game_key=None, big_key=None, reactor=None):
     job_id = status["job_id"]
     clips = (status.get("result") or {}).get("clips") or []
     if not clips:
@@ -442,7 +542,12 @@ def collect(api, status, source, display=None, game_key=None, big_key=None):
         src = os.path.join(REPO, "output", job_id, clip_file)
         if not os.path.exists(src):
             raise RuntimeError(f"clip file missing on disk: {src}")
-        shutil.copy2(src, os.path.join(folder, f"clip{n}.mp4"))
+        dest = os.path.join(folder, f"clip{n}.mp4")
+        # with a reactor the clip lands in Clips Ready already finished, never as a plain clip first
+        if reactor and reactor_render(reactor, src, dest, os.path.basename(name)):
+            log(f"REACTOR: {reactor} added to clip {n}: {os.path.basename(name)}")
+        else:
+            shutil.copy2(src, dest)
         try:
             thumbnail(src, job_id, clip_file, os.path.join(folder, f"clip{n}.jpg"))
         except Exception as e:
@@ -484,6 +589,9 @@ def main():
             "auto_hook": True, "clip_max_seconds": 59, "target_clips": TOP_N}
     hide = hide_flagged(video, is_url)
     game = hide_flagged(video, is_url, GAME_FILE)
+    reactor = reactor_pick(video, is_url)
+    if reactor:
+        body["clip_max_seconds"] = 59 - REACTOR_ROOM
     if game:
         body["target_clips"] = GAME_CANDIDATES   # more candidates, keep the best 3 that show the game
     elif not hide:
@@ -533,11 +641,13 @@ def main():
     log(f"job {jid} started")
     gk = key if game else None
     if not hide:
-        wait_and_collect(api, jid, video, quiet, game_key=gk, big_key=None if game else key)
+        wait_and_collect(api, jid, video, quiet, game_key=gk, big_key=None if game else key, reactor=reactor)
         return
     try:
         folder = wait_and_collect(api, jid, video, quiet, display, game_key=gk)
         hide_voice(folder, label)
+        if reactor:   # after the voice step, or his "Check this out" would be stripped too
+            add_reactor(folder, reactor, label)
     finally:
         removed = scrub_job_media(jid)   # also when the job failed: partial clips have his voice
         log(f"HIDE: {removed} leftover file(s) with his voice deleted: {label}")
@@ -556,7 +666,7 @@ def upload(api, video):
     return slot["upload_id"]
 
 
-def wait_and_collect(api, jid, video, quiet, display=None, game_key=None, big_key=None):
+def wait_and_collect(api, jid, video, quiet, display=None, game_key=None, big_key=None, reactor=None):
     t0, last = time.time(), None
     while True:
         st = api.call("GET", f"/api/status/{jid}")
@@ -572,7 +682,7 @@ def wait_and_collect(api, jid, video, quiet, display=None, game_key=None, big_ke
             raise RuntimeError("job still running after 4 h")
         time.sleep(20)
     st["job_id"] = jid
-    folder = collect(api, st, video, display, game_key, big_key)
+    folder = collect(api, st, video, display, game_key, big_key, reactor)
     log(f"saved clips to {folder}")
     print(f"SAVED {folder}", flush=True)
     if not quiet:

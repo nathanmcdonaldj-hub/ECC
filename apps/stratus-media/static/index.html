@@ -93,6 +93,15 @@ button{cursor:pointer}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
 .price{font-size:20px;font-weight:900;font-variant-numeric:tabular-nums;color:var(--gold2)}
 details.pr summary{cursor:pointer;font-size:12px;color:var(--mute);font-weight:800}
+.rxpick{display:flex;flex-direction:column;gap:6px;background:var(--navy);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.rxpick small{font-size:12px;color:var(--mute);font-weight:600}
+.rxrow{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.rx{border:2px solid var(--line);background:transparent;border-radius:14px;padding:6px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;color:inherit;font:inherit}
+.rx img,.rx .none{width:100%;aspect-ratio:1;border-radius:10px;object-fit:cover;display:block}
+.rx .none{display:flex;align-items:center;justify-content:center;font-size:28px;background:rgba(255,255,255,.06)}
+.rx b{font-size:12px}
+.rx.on{border-color:var(--gold);background:rgba(227,181,74,.12)}
+.rx:disabled{opacity:.45;cursor:default}
 .hidesw{display:flex;align-items:center;gap:10px;cursor:pointer;background:var(--navy);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .hidesw input{position:absolute;opacity:0;width:1px;height:1px}
 .hidesw .knob{flex:none;width:42px;height:24px;border-radius:999px;background:#2a3b7d;position:relative;transition:background .2s}
@@ -287,6 +296,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let S = null;            // latest state
 let gameOn = (() => { try { return localStorage.getItem("gameOnly") === "1"; } catch (e) { return false; } })();
+let reactorPick = "";   // reactor for the NEXT video added; goes back to None after each add
 let hideOn = (() => { try { return localStorage.getItem("hideStreamer") === "1"; } catch (e) { return false; } })();
 let openStation = null;  // station currently shown in the sheet
 let voiceOn = (() => { try { return localStorage.getItem("voice") !== "off"; } catch (e) { return true; } })();
@@ -515,10 +525,12 @@ const SHEETS = {
     <div class="box"><label class="f">Or paste a video link<input type="url" id="linkIn" placeholder="https://…"></label>
       <label class="hidesw"><input type="checkbox" id="hideSw" ${hideOn ? "checked" : ""}><span class="knob"></span><span><b>🙈 Hide the streamer</b><small>Covers his facecam and removes his voice. Game and background sound stay.</small></span></label>
       <label class="hidesw"><input type="checkbox" id="gameSw" ${gameOn ? "checked" : ""}><span class="knob"></span><span><b>🎮 Game play only</b><small>Only clips moments of the game itself. Skips tweets, web pages, his desktop and just-chatting parts.</small></span></label>
+      <div class="rxpick"><b>🎙 Add a reactor</b><small>For podcast and debate clips. Pick him before you add the video. He opens with “Check this out” in your voice, then watches from the corner.${S.reactor_ready ? "" : " Ready as soon as your “Check this out” recording is in."}</small>
+        <div class="rxrow"><button class="rx ${reactorPick && S.reactor_ready ? "" : "on"}" data-reactor=""><span class="none">🚫</span><b>None</b></button>${(S.reactors || []).map(r => `<button class="rx ${S.reactor_ready && reactorPick === r.id ? "on" : ""}" data-reactor="${esc(r.id)}" ${S.reactor_ready ? "" : "disabled"}><img src="/static/reactor-${esc(r.id)}.jpg" alt=""><b>${esc(r.name)}</b></button>`).join("")}</div></div>
       <div><button class="btn go" id="linkGo">Add link</button></div>
       </div>
     <h3>In line to clip</h3>
-    ${S.inbox.length ? `<table><tr><th>Item</th><th>Type</th></tr>${S.inbox.map(i => `<tr><td style="word-break:break-all">${esc(i.name)}</td><td>${i.kind === "link" ? "Link" : i.size_mb + " MB"}${i.hide ? (S.hide_ready ? " · 🙈 streamer hidden" : " · 🙈 waits for setup (in progress)") : ""}${i.game ? " · 🎮 game play only" : ""}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing in line.</p>`}`,
+    ${S.inbox.length ? `<table><tr><th>Item</th><th>Type</th></tr>${S.inbox.map(i => `<tr><td style="word-break:break-all">${esc(i.name)}</td><td>${i.kind === "link" ? "Link" : i.size_mb + " MB"}${i.hide ? (S.hide_ready ? " · 🙈 streamer hidden" : " · 🙈 waits for setup (in progress)") : ""}${i.game ? " · 🎮 game play only" : ""}${i.reactor ? " · 🎙 " + esc(i.reactor) : ""}</td></tr>`).join("")}</table>` : `<p class="muted">Nothing in line.</p>`}`,
   clipper: () => `
     <div class="box"><b>No set hours: you decide</b><span class="muted">One video at a time, up to 3 clips each. Press CLOSED at the top while you trade, and the clipper is fully off so your trading desk gets the whole Mac. Press OPEN to start again.</span></div>
     <h3>Redo requests</h3>
@@ -647,10 +659,16 @@ function confirmCard(a) {
 
 const AFTER = {
   inbox: () => {
-    dropZone($("#vidDrop"), "video/*", f => upload("video", f, (hideOn ? "&hide=1" : "") + (gameOn ? "&game=1" : "")));
+    const rxUsed = j => { if (j && j.ok && reactorPick) { reactorPick = ""; if (openStation === "inbox") renderSheet("inbox", true); } };
+    if (!S.reactor_ready) reactorPick = "";
+    document.querySelectorAll("[data-reactor]").forEach(b => b.onclick = () => {
+      reactorPick = b.dataset.reactor;
+      document.querySelectorAll("[data-reactor]").forEach(x => x.classList.toggle("on", x === b));
+    });
+    dropZone($("#vidDrop"), "video/*", f => upload("video", f, (hideOn ? "&hide=1" : "") + (gameOn ? "&game=1" : "") + (reactorPick ? "&reactor=" + encodeURIComponent(reactorPick) : "")).then(rxUsed));
     $("#gameSw").onchange = e => { gameOn = e.target.checked; try { localStorage.setItem("gameOnly", gameOn ? "1" : "0"); } catch (x) {} };
     $("#hideSw").onchange = e => { hideOn = e.target.checked; try { localStorage.setItem("hideStreamer", hideOn ? "1" : "0"); } catch (x) {} };
-    $("#linkGo").onclick = () => api("/api/link", {url: $("#linkIn").value, hide: hideOn, game: gameOn});
+    $("#linkGo").onclick = () => api("/api/link", {url: $("#linkIn").value, hide: hideOn, game: gameOn, reactor: reactorPick}).then(rxUsed);
   },
   ugc: () => {
     let cover = null;
