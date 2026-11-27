@@ -355,28 +355,32 @@ def set_hide(kind, value, on, fname=HIDE_FILE):
 # Reactor character (2026-11-27): picked per video when it is added. Read by the clipping pipeline from
 # Clip Inbox/reactor.json: {"links": {url: character}, "files": {name: character}}.
 REACTOR_FILE = "reactor.json"
-REACTORS = {"studio-host": "Studio Host", "felt-puppet": "Felt Puppet", "gold-mask": "Gold Mask"}
-REACTOR_TOOL = os.path.join(APP_DIR, "tools", "reactor", "reactor.py")
-REACTOR_VOICE_DIR = os.path.join(DATA_DIR, "reactor")
-REACTOR_VOICE_EXT = (".m4a", ".wav", ".mp3", ".aac", ".caf", ".mp4")
+REACTOR_DIR = os.path.join(APP_DIR, "tools", "reactor")
+REACTOR_TOOL = os.path.join(REACTOR_DIR, "reactor2.py")   # realistic reactor (v2); his voice is baked into its intro
+REACTOR_MANIFEST = os.path.join(REACTOR_DIR, "reactors.json")   # [{"id", "name", "thumb"}]: the characters he approved
 
 
-def reactor_voice():
-    """His one reusable "Check this out" recording (voice.m4a, voice.wav, ...), or None."""
-    try:
-        names = sorted(os.listdir(REACTOR_VOICE_DIR))
-    except OSError:
-        return None
-    for n in names:
-        if n.lower().startswith("voice.") and n.lower().endswith(REACTOR_VOICE_EXT):
-            return os.path.join(REACTOR_VOICE_DIR, n)
-    return None
+def reactors():
+    """The characters the installed reactor template offers: {id: {"name", "thumb" (file or None)}}."""
+    out = {}
+    listed = load_json(REACTOR_MANIFEST, [])
+    for r in listed if isinstance(listed, list) else []:
+        if not isinstance(r, dict) or not re.match(r"^[a-z0-9][a-z0-9-]{0,40}$", str(r.get("id") or "")):
+            continue
+        thumb = os.path.normpath(os.path.join(REACTOR_DIR, str(r.get("thumb") or "")))
+        ok = thumb.startswith(REACTOR_DIR + os.sep) and os.path.isfile(thumb)
+        out[r["id"]] = {"name": str(r.get("name") or r["id"])[:40], "thumb": thumb if ok else None}
+    return out
+
+
+def reactor_name(character):
+    return (reactors().get(character) or {}).get("name")
 
 
 def reactor_ready():
-    """The reactor can be added: switched on (config "reactor", off until he has OK'd the character),
-    the renderer is installed and his voice recording is in."""
-    return bool(CONFIG.get("reactor")) and os.path.exists(REACTOR_TOOL) and bool(reactor_voice())
+    """The reactor can be added: switched on (config "reactor", off until he has OK'd the character)
+    and the renderer with at least one character is installed."""
+    return bool(CONFIG.get("reactor")) and os.path.exists(REACTOR_TOOL) and bool(reactors())
 
 
 def reactor_flags():
@@ -389,7 +393,7 @@ def set_reactor(kind, value, character):
     d = reactor_flags()
     key = "links" if kind == "link" else "files"
     d[key].pop(value, None)
-    if character in REACTORS:
+    if character in reactors():
         d[key][value] = character
     try:
         save_json(os.path.join(CONFIG["clip_inbox"], REACTOR_FILE), d)
@@ -425,7 +429,7 @@ def list_inbox():
                 if name in processed or full in processed:
                     continue
                 items.append({"kind": "video", "name": name, "hide": name in hide["files"], "game": name in game["files"],
-                              "reactor": REACTORS.get(reactor["files"].get(name)),
+                              "reactor": reactor_name(reactor["files"].get(name)),
                               "size_mb": round(os.path.getsize(full) / 1e6, 1)})
     except OSError:
         pass
@@ -435,7 +439,7 @@ def list_inbox():
                 url = line.strip()
                 if url and not url.startswith("#") and url not in processed:
                     items.append({"kind": "link", "name": url, "hide": url in hide["links"], "game": url in game["links"],
-                                  "reactor": REACTORS.get(reactor["links"].get(url))})
+                                  "reactor": reactor_name(reactor["links"].get(url))})
     except OSError:
         pass
     return items
@@ -1636,7 +1640,7 @@ def add_link(url, hide=False, game=False, reactor=None):
             set_hide("link", url, True)
         if game:
             set_hide("link", url, True, GAMEPLAY_FILE)
-        reactor = reactor if (reactor in REACTORS and reactor_ready()) else None
+        reactor = reactor if (reactor_ready() and reactor in reactors()) else None
         set_reactor("link", url, reactor)
     except OSError as exc:
         raise_error("Inbox Clerk", "Couldn't save the link",
@@ -1645,7 +1649,7 @@ def add_link(url, hide=False, game=False, reactor=None):
         return False, "Couldn't save it."
     return True, "Queued for the next clipping run." + (" The streamer's face and voice will be hidden." if hide else "") \
         + (" Only game play moments will be clipped." if game else "") \
-        + (" {} will be added to its clips.".format(REACTORS[reactor]) if reactor else "")
+        + (" {} will be added to its clips.".format(reactor_name(reactor)) if reactor else "")
 
 
 def write_redo(rec, note):
@@ -1777,7 +1781,7 @@ def build_state(for_model=False):
         "inbox": inbox,
         "hide_ready": hide_ready(),
         "reactor_ready": reactor_ready(),
-        "reactors": [{"id": k, "name": v} for k, v in REACTORS.items()],
+        "reactors": [{"id": k, "name": v["name"]} for k, v in reactors().items()],
         "clips_waiting": waiting,
         "clips_scheduled": scheduled,
         "tiktok": tiktok,
@@ -2202,9 +2206,6 @@ def explain_clipper_line(line):
     if "gameplay: check failed" in low:
         return ("The game-play check couldn't run for one clip (Gemini didn't answer), so that clip was left out to be safe.",
                 "Nothing to do. If it keeps happening, ask Claude in your project chat.")
-    if "reactor:" in low and "no voice recording" in low:
-        return ("A video had a reactor picked, but your “Check this out” recording isn't in yet, so its clips were made without him.",
-                "Send Claude your “Check this out” voice memo in the project chat.")
     if "reactor:" in low:
         return ("The reactor couldn't be added to a clip, so that clip was made without him.",
                 "Nothing to do. If it keeps happening, ask Claude in your project chat.")
@@ -2335,6 +2336,9 @@ class Handler(BaseHTTPRequestHandler):
             if q.get("music") and rec.get("music_file"):
                 return self.send_file(rec["music_file"])
             return self.send_file(rec["file"])
+        if url.path == "/reactor-thumb":
+            thumb = (reactors().get((q.get("id") or [""])[0]) or {}).get("thumb")
+            return self.send_file(thumb) if thumb else self.send_error(404)
         if url.path == "/music":
             name = os.path.basename((q.get("f") or [""])[0])
             return self.send_file(os.path.join(CONFIG["music_dir"], name))
@@ -2413,11 +2417,11 @@ class Handler(BaseHTTPRequestHandler):
         picked = None
         if kind == "video":
             picked = (q.get("reactor") or [""])[0]
-            picked = picked if (picked in REACTORS and reactor_ready()) else None
+            picked = picked if (reactor_ready() and picked in reactors()) else None
             set_reactor("file", name, picked)
         return self.send_json({"ok": True, "path": dest, "name": name,
                                "message": ("Added to the Clip Inbox. It's clipped on the next run."
-                                           + (" {} will be added to its clips.".format(REACTORS[picked]) if picked else ""))
+                                           + (" {} will be added to its clips.".format(reactor_name(picked)) if picked else ""))
                                if kind == "video" else "Saved."})
 
 

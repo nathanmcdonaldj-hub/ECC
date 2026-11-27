@@ -56,19 +56,22 @@ Everything else is unchanged.
 
 ## Reactor (2026-11-27)
 
-The dashboard's Inbox Clerk lets Mr. McDonald pick a reactor for a video (None, Studio Host, Felt
-Puppet, Gold Mask). The pick is saved in `~/Movies/Clip Inbox/reactor.json`
-(`{"links": {url: character}, "files": {name: character}}`).
+The dashboard's Inbox Clerk lets Mr. McDonald pick a reactor for a video (None, or a character
+listed in the installed template's `reactors.json`). The pick is saved in
+`~/Movies/Clip Inbox/reactor.json` (`{"links": {url: character}, "files": {name: character}}`).
 
-- For a picked video, clips are capped at 56 s so the ~2 s intro keeps them under 60 s.
+- The template lives in `~/stratus-media/tools/reactor/`: `reactor2.py`, `reactors.json`
+  (`[{"id", "name", "thumb"}]`) and `assets/`. It is built by the reactor thread and copied there;
+  the cartoon v1 (`reactor.py`) was rejected and removed.
+- For a picked video, clips are capped at 57 s so the ~1.5 s intro keeps them under 60 s.
 - Each finished clip (captions already burned in) is run through
-  `~/stratus-media/tools/reactor/reactor.py` before it lands in Clips Ready: the reactor says
-  "Check this out" in his own voice, then sits in a corner box. Music and the end tag are still
-  added later by the dashboard.
-- The voice is ONE reusable recording at
-  `~/Library/Application Support/StratusMedia/reactor/voice.<m4a|wav|mp3>`. Without it the picker is
-  greyed out and no reactor is added.
-- Needs a Python with Pillow and the dashboard's ffmpeg (`~/stratus-media/bin/ffmpeg`).
+  `reactor2.py --character <id> --clip in.mp4 --out out.mp4` before it lands in Clips Ready: the
+  reactor says "Check this out" in his own voice (baked into the intro), then sits in a lower-left
+  corner box. Music and the end tag are still added later by the dashboard.
+- The picker only shows when config `reactor` is true (off until he has OK'd the character) and the
+  template is installed.
+- Needs a Python with Pillow and the dashboard's ffmpeg (`~/stratus-media/bin/ffmpeg`, passed as
+  `FFMPEG`).
 - Fail-open: if the step can't run, the plain clip is kept and the log line starts with
   `REACTOR: failed`, which the dashboard shows in plain words.
 - With "Hide the streamer" on, the reactor is added after the voice-removal step.

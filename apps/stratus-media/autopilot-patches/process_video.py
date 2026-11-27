@@ -75,14 +75,13 @@ OPENSHORTS_HINT_FIELD = None
 # The dashboard notes the reactor picked for a source in ~/Movies/Clip Inbox/reactor.json
 # ({"links": {url: character}, "files": {name: character}}). Each finished clip (captions already
 # burned in) then opens with the reactor saying "Check this out" in Mr. McDonald's own voice and
-# keeps him in a corner box while the clip plays. Music and the end tag are added later by the
+# keeps him in a lower-left corner box while the clip plays. Music and the end tag are added later by the
 # dashboard. Fail-open: if the step can't run, the plain clip is kept and the log says why.
 REACTOR_FILE = os.path.join(HOME, "Movies", "Clip Inbox", "reactor.json")
-REACTOR_TOOL = os.path.join(HOME, "stratus-media", "tools", "reactor", "reactor.py")
-REACTOR_VOICE_DIR = os.path.join(HOME, "Library", "Application Support", "StratusMedia", "reactor")
-REACTOR_VOICE_EXT = (".m4a", ".wav", ".mp3", ".aac", ".caf", ".mp4")
-REACTORS = ("studio-host", "felt-puppet", "gold-mask")
-REACTOR_ROOM = 3   # seconds kept free for the intro, so intro + clip stays under 60 s
+REACTOR_DIR = os.path.join(HOME, "stratus-media", "tools", "reactor")
+REACTOR_TOOL = os.path.join(REACTOR_DIR, "reactor2.py")       # v2: realistic reactor, his voice baked into the intro
+REACTOR_MANIFEST = os.path.join(REACTOR_DIR, "reactors.json")  # [{"id", "name", ...}]: the characters he approved
+REACTOR_ROOM = 2   # seconds kept free for the ~1.5 s intro, so intro + clip stays under 60 s
 
 
 def log(*a):
@@ -126,10 +125,20 @@ def hide_flagged(video, is_url, path=HIDE_FILE):
     return os.path.basename(video) in [os.path.basename(str(f)) for f in (d.get("files") or [])]
 
 
-def reactor_pick(video, is_url, path=REACTOR_FILE):
+def reactor_ids(path=None):
+    """Character ids the installed reactor template offers."""
+    try:
+        with open(path or REACTOR_MANIFEST, encoding="utf-8") as fh:
+            return {str(r.get("id")) for r in json.load(fh)
+                    if isinstance(r, dict) and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", str(r.get("id") or ""))}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return set()
+
+
+def reactor_pick(video, is_url, path=None):
     """The reactor character picked for this source on the dashboard, or None."""
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(path or REACTOR_FILE, encoding="utf-8") as fh:
             d = json.load(fh)
     except (OSError, ValueError):
         return None
@@ -137,19 +146,7 @@ def reactor_pick(video, is_url, path=REACTOR_FILE):
         c = (d.get("links") or {}).get(video.strip())
     else:
         c = {os.path.basename(str(k)): v for k, v in (d.get("files") or {}).items()}.get(os.path.basename(video))
-    return c if c in REACTORS else None
-
-
-def reactor_voice():
-    """His one reusable "Check this out" recording (voice.m4a, voice.wav, ...), or None."""
-    try:
-        names = sorted(os.listdir(REACTOR_VOICE_DIR))
-    except OSError:
-        return None
-    for n in names:
-        if n.lower().startswith("voice.") and n.lower().endswith(REACTOR_VOICE_EXT):
-            return os.path.join(REACTOR_VOICE_DIR, n)
-    return None
+    return c if c in reactor_ids() else None
 
 
 _REACTOR_PY = []
@@ -172,21 +169,17 @@ def reactor_python():
 
 def reactor_render(character, src, dest, label):
     """Write `dest` = `src` with the reactor intro + corner box. Returns True when it worked."""
-    voice, py = reactor_voice(), None
-    if not voice:
-        log(f"REACTOR: failed, no voice recording yet: {label}")
-        return False
-    if os.path.exists(REACTOR_TOOL):
-        py = reactor_python()
+    py = reactor_python() if os.path.exists(REACTOR_TOOL) else None
     if not py:
         log(f"REACTOR: failed, the reactor tool isn't set up on this Mac: {label}")
         return False
     tmp = os.path.join(os.path.dirname(dest), "." + os.path.basename(dest)[:-4] + ".reactor.mp4")
-    env = dict(os.environ, PATH=os.path.dirname(HOST_FFMPEG) + os.pathsep + os.environ.get("PATH", ""))
+    env = dict(os.environ, FFMPEG=HOST_FFMPEG,
+               PATH=os.path.dirname(HOST_FFMPEG) + os.pathsep + os.environ.get("PATH", ""))
     err = ""
     try:
-        p = subprocess.run([py, REACTOR_TOOL, "--character", character, "--clip", src, "--voice", voice,
-                            "--out", tmp], capture_output=True, text=True, timeout=1200, env=env)
+        p = subprocess.run([py, REACTOR_TOOL, "--character", character, "--clip", src, "--out", tmp],
+                           capture_output=True, text=True, timeout=1200, env=env)
         ok = p.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 100000
         err = (p.stderr or "").strip().splitlines()[-1][:200] if (p.stderr or "").strip() else f"code {p.returncode}"
     except (OSError, subprocess.TimeoutExpired) as e:

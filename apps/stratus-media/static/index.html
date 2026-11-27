@@ -526,7 +526,7 @@ const SHEETS = {
       <label class="hidesw"><input type="checkbox" id="hideSw" ${hideOn ? "checked" : ""}><span class="knob"></span><span><b>🙈 Hide the streamer</b><small>Covers his facecam and removes his voice. Game and background sound stay.</small></span></label>
       <label class="hidesw"><input type="checkbox" id="gameSw" ${gameOn ? "checked" : ""}><span class="knob"></span><span><b>🎮 Game play only</b><small>Only clips moments of the game itself. Skips tweets, web pages, his desktop and just-chatting parts.</small></span></label>
       ${S.reactor_ready ? `<div class="rxpick"><b>🎙 Add a reactor</b><small>For podcast and debate clips. Pick him before you add the video. He opens with “Check this out” in your voice, then watches from the corner.</small>
-        <div class="rxrow"><button class="rx ${reactorPick && S.reactor_ready ? "" : "on"}" data-reactor=""><span class="none">🚫</span><b>None</b></button>${(S.reactors || []).map(r => `<button class="rx ${S.reactor_ready && reactorPick === r.id ? "on" : ""}" data-reactor="${esc(r.id)}" ${S.reactor_ready ? "" : "disabled"}><img src="/static/reactor-${esc(r.id)}.jpg" alt=""><b>${esc(r.name)}</b></button>`).join("")}</div></div>` : ""}
+        <div class="rxrow"><button class="rx ${reactorPick && S.reactor_ready ? "" : "on"}" data-reactor=""><span class="none">🚫</span><b>None</b></button>${(S.reactors || []).map(r => `<button class="rx ${S.reactor_ready && reactorPick === r.id ? "on" : ""}" data-reactor="${esc(r.id)}" ${S.reactor_ready ? "" : "disabled"}><img src="/reactor-thumb?id=${encodeURIComponent(r.id)}" alt=""><b>${esc(r.name)}</b></button>`).join("")}</div></div>` : ""}
       <div><button class="btn go" id="linkGo">Add link</button></div>
       </div>
     <h3>In line to clip</h3>
