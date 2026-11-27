@@ -79,7 +79,9 @@ OPENSHORTS_HINT_FIELD = None
 # dashboard. Fail-open: if the step can't run, the plain clip is kept and the log says why.
 REACTOR_FILE = os.path.join(HOME, "Movies", "Clip Inbox", "reactor.json")
 REACTOR_DIR = os.path.join(HOME, "stratus-media", "tools", "reactor")
-REACTOR_TOOL = os.path.join(REACTOR_DIR, "reactor2.py")       # v2: realistic reactor, his voice baked into the intro
+# Newest installed template wins. reactor3 = reacts to what is said (asks Gemini for the moments from
+# the clip's audio, falls back to a calm idle); reactor2 = calm idle only. His voice is baked into the intro.
+REACTOR_TOOLS = ("reactor3.py", "reactor2.py")
 REACTOR_MANIFEST = os.path.join(REACTOR_DIR, "reactors.json")  # [{"id", "name", ...}]: the characters he approved
 REACTOR_ROOM = 2   # seconds kept free for the ~1.5 s intro, so intro + clip stays under 60 s
 
@@ -149,6 +151,13 @@ def reactor_pick(video, is_url, path=None):
     return c if c in reactor_ids() else None
 
 
+def reactor_tool():
+    for n in REACTOR_TOOLS:
+        if os.path.exists(os.path.join(REACTOR_DIR, n)):
+            return os.path.join(REACTOR_DIR, n)
+    return None
+
+
 _REACTOR_PY = []
 
 
@@ -169,29 +178,40 @@ def reactor_python():
 
 def reactor_render(character, src, dest, label):
     """Write `dest` = `src` with the reactor intro + corner box. Returns True when it worked."""
-    py = reactor_python() if os.path.exists(REACTOR_TOOL) else None
+    tool = reactor_tool()
+    py = reactor_python() if tool else None
     if not py:
         log(f"REACTOR: failed, the reactor tool isn't set up on this Mac: {label}")
         return False
     tmp = os.path.join(os.path.dirname(dest), "." + os.path.basename(dest)[:-4] + ".reactor.mp4")
-    env = dict(os.environ, FFMPEG=HOST_FFMPEG,
+    cues = tmp + ".cues.json"   # reactor3 notes the moments it reacted to next to its output
+    env = dict(os.environ, FFMPEG=HOST_FFMPEG, STRATUS_GEMINI_MODEL=GEMINI_MODEL,
                PATH=os.path.dirname(HOST_FFMPEG) + os.pathsep + os.environ.get("PATH", ""))
+    try:
+        key = read_key()   # same Gemini key the clipper uses; handed to the tool in its environment only
+    except OSError:
+        key = ""
+    if key:
+        env["GEMINI_API_KEY"] = key
     err = ""
     try:
-        p = subprocess.run([py, REACTOR_TOOL, "--character", character, "--clip", src, "--out", tmp],
+        p = subprocess.run([py, tool, "--character", character, "--clip", src, "--out", tmp],
                            capture_output=True, text=True, timeout=1200, env=env)
         ok = p.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 100000
         err = (p.stderr or "").strip().splitlines()[-1][:200] if (p.stderr or "").strip() else f"code {p.returncode}"
     except (OSError, subprocess.TimeoutExpired) as e:
         ok, err = False, str(e)[:200]
     if not ok:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        for f in (tmp, cues):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
         log(f"REACTOR: failed on {os.path.basename(dest)}, kept the plain clip: {label} ({err})")
         return False
     os.replace(tmp, dest)
+    if os.path.exists(cues):
+        os.replace(cues, dest[:-4] + ".cues.json")
     return True
 
 

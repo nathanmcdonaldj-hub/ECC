@@ -356,7 +356,7 @@ def set_hide(kind, value, on, fname=HIDE_FILE):
 # Clip Inbox/reactor.json: {"links": {url: character}, "files": {name: character}}.
 REACTOR_FILE = "reactor.json"
 REACTOR_DIR = os.path.join(APP_DIR, "tools", "reactor")
-REACTOR_TOOL = os.path.join(REACTOR_DIR, "reactor2.py")   # realistic reactor (v2); his voice is baked into its intro
+REACTOR_TOOLS = ("reactor3.py", "reactor2.py")   # realistic reactor; newest installed wins (the clipper picks the same way)
 REACTOR_MANIFEST = os.path.join(REACTOR_DIR, "reactors.json")   # [{"id", "name", "thumb"}]: the characters he approved
 
 
@@ -380,7 +380,8 @@ def reactor_name(character):
 def reactor_ready():
     """The reactor can be added: switched on (config "reactor", off until he has OK'd the character)
     and the renderer with at least one character is installed."""
-    return bool(CONFIG.get("reactor")) and os.path.exists(REACTOR_TOOL) and bool(reactors())
+    return bool(CONFIG.get("reactor")) and bool(reactors()) \
+        and any(os.path.exists(os.path.join(REACTOR_DIR, n)) for n in REACTOR_TOOLS)
 
 
 def reactor_flags():
