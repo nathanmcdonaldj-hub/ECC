@@ -91,6 +91,10 @@ REACTOR_ROOM = 2   # seconds kept free for the ~1.5 s intro, so intro + clip sta
 #   "room":           seconds the template adds to a clip in total (intro + outro)
 #   "caption_scale":  optional, 0.6-1.0: the words are drawn this much smaller (outline too), still
 #                     ending at "caption_bottom". Missing: same size as OpenShorts made them.
+#   "end_trim":       optional, true: the tool may cut a leftover title card off the end of a clip. The
+#                     clipper then tells it where the clip's last burned-in words end
+#                     (--keep-until <seconds>), so it never cuts into speech. When that isn't known
+#                     the flag is left out and the tool must not trim.
 # OpenShorts has no caption-height option, but every job keeps the clean clip, the exact .ass it
 # burned and the hook picture + position. So for those characters the clip is burned again from
 # these with the words higher, inside the backend container (the same ffmpeg, libass and fonts
@@ -257,6 +261,30 @@ def lift_ass(text, bottom, frame_h=1920, scale=None):
     return "\n".join(out) + "\n" if changed else None
 
 
+def ass_end(text):
+    """Clip time (seconds) at which the last caption in an .ass text ends, or None when it has none."""
+    last = None
+    for line in text.splitlines():
+        if line.lower().startswith("dialogue:"):
+            parts = line.split(":", 1)[1].split(",", 9)
+            m = re.fullmatch(r"\s*(\d+):(\d\d):(\d\d(?:\.\d+)?)\s*", parts[2]) if len(parts) == 10 else None
+            if m and parts[9].strip():
+                t = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+                last = t if last is None else max(last, t)
+    return last
+
+
+def speech_end(job_id, clip_file):
+    """Where a finished clip's last burned-in words end (clip seconds), or None when that can't be told."""
+    try:
+        job_dir = os.path.join(REPO, "output", job_id)
+        _base, sub, _hook = job_parts(job_dir, clip_file)
+        with open(os.path.join(job_dir, sub), encoding="utf-8", errors="replace") as fh:
+            return ass_end(fh.read())
+    except (OSError, ValueError):
+        return None
+
+
 def png_size(path):
     with open(path, "rb") as fh:
         head = fh.read(24)
@@ -370,8 +398,10 @@ def reactor_python():
     return _REACTOR_PY[0]
 
 
-def reactor_render(character, src, dest, label):
-    """Write `dest` = `src` with the reactor intro + corner box. Returns True when it worked."""
+def reactor_render(character, src, dest, label, keep_until=None):
+    """Write `dest` = `src` with the reactor intro + corner box. Returns True when it worked.
+    `keep_until`: clip seconds up to which nothing may be trimmed (where the last words end); passed
+    on only to templates that say "end_trim": true."""
     tool = reactor_tool()
     py = reactor_python() if tool else None
     if not py:
@@ -389,8 +419,10 @@ def reactor_render(character, src, dest, label):
         env["GEMINI_API_KEY"] = key
     err = ""
     try:
-        p = subprocess.run([py, tool, "--character", character, "--clip", src, "--out", tmp],
-                           capture_output=True, text=True, timeout=1200, env=env)
+        cmd = [py, tool, "--character", character, "--clip", src, "--out", tmp]
+        if _number(keep_until) is not None and keep_until >= 0 and reactor_info(character).get("end_trim") is True:
+            cmd += ["--keep-until", f"{keep_until:.2f}"]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=1200, env=env)
         ok = p.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 100000
         err = (p.stderr or "").strip().splitlines()[-1][:200] if (p.stderr or "").strip() else f"code {p.returncode}"
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -759,7 +791,7 @@ def collect(api, status, source, display=None, game_key=None, big_key=None, reac
             try:
                 if bottom:   # his box sits at the bottom: the words go just above it first
                     base = raise_captions(job_id, clip_file, bottom, n, scale)
-                added = reactor_render(reactor, base, dest, label)
+                added = reactor_render(reactor, base, dest, label, speech_end(job_id, clip_file))
             except Exception as e:
                 log(f"REACTOR: failed to move the words above him on clip {n}, kept the plain clip: "
                     f"{label} ({str(e)[:200]})")

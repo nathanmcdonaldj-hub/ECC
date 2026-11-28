@@ -91,6 +91,11 @@ still **not** edited. Instead, a character in `reactors.json` can carry:
   alone) and still end at `caption_bottom`. Missing or out of range: OpenShorts' size. It only
   applies together with `caption_bottom`.
 
+- `"end_trim"` (optional, `true`): the reactor tool may cut a leftover title card off a clip's end.
+  The clipper then passes `--keep-until <seconds>` = where the clip's last burned-in words end (from
+  the job's `.ass`), so the tool never cuts into speech. When that isn't known (no captions, "Hide
+  the streamer") the flag is left out and the tool must not trim.
+
 For such a character each picked clip is burned again before the reactor step, from what the job
 keeps in `~/openshorts/output/<job>/`: the clean clip (`<name>_clip_N.mp4`), the exact caption file
 (`autosubs_<ts>_<id>.ass`, bottom style margin raised) and the hook title picture + position
