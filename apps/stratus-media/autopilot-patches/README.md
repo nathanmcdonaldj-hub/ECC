@@ -86,6 +86,10 @@ still **not** edited. Instead, a character in `reactors.json` can carry:
 - `"caption_bottom"`: the row (of a 1920-tall frame) the words must end at, for example `1280`
 - `"room"`: seconds the template adds to a clip in total (intro + outro); clips are capped at
   `59 - room` (2 s when not stated)
+- `"caption_scale"` (optional, 0.6 to 1.0): the words are drawn that much smaller (bottom style's
+  font size, outline and shadow, plus inline `\fs` tags; `\fscx`/`\fscy` pop percentages are left
+  alone) and still end at `caption_bottom`. Missing or out of range: OpenShorts' size. It only
+  applies together with `caption_bottom`.
 
 For such a character each picked clip is burned again before the reactor step, from what the job
 keeps in `~/openshorts/output/<job>/`: the clean clip (`<name>_clip_N.mp4`), the exact caption file

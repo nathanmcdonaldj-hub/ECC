@@ -89,6 +89,8 @@ REACTOR_ROOM = 2   # seconds kept free for the ~1.5 s intro, so intro + clip sta
 # A template whose box sits at the bottom of the frame says so per character in reactors.json:
 #   "caption_bottom": the row (pixels of a 1920-tall frame) the burned-in words must end at
 #   "room":           seconds the template adds to a clip in total (intro + outro)
+#   "caption_scale":  optional, 0.6-1.0: the words are drawn this much smaller (outline too), still
+#                     ending at "caption_bottom". Missing: same size as OpenShorts made them.
 # OpenShorts has no caption-height option, but every job keeps the clean clip, the exact .ass it
 # burned and the hook picture + position. So for those characters the clip is burned again from
 # these with the words higher, inside the backend container (the same ffmpeg, libass and fonts
@@ -197,12 +199,32 @@ def caption_bottom(character, path=None):
     return int(v) if v is not None and 400 <= v <= 1800 else None
 
 
-def lift_ass(text, bottom, frame_h=1920):
+def caption_scale(character, path=None):
+    """How much smaller this character wants the words (0.6-1.0), or None to keep OpenShorts' size."""
+    v = _number(reactor_info(character, path).get("caption_scale"))
+    return float(v) if v is not None and 0.6 <= v <= 1.0 else None
+
+
+def _fmt(v):
+    return f"{v:.2f}".rstrip("0").rstrip(".")
+
+
+def scale_fs_tags(line, scale):
+    """Scale inline font-size tags (\\fs34, \\fs+2) in one Dialogue line. \\fscx/\\fscy are percentages
+    and \\fsp is letter spacing, so those are left alone."""
+    return re.sub(r"\\fs([+-]?)(\d+(?:\.\d+)?)",
+                  lambda m: "\\fs" + m.group(1) + _fmt(float(m.group(2)) * scale), line)
+
+
+def lift_ass(text, bottom, frame_h=1920, scale=None):
     """The .ass text with its bottom-aligned styles' margin set so the words end at about row `bottom`.
-    None when no style could be changed. Mid-frame lines (split layout, {\\an5}) are not affected."""
+    With `scale` (0.6-1.0) those styles' font size and outline, and inline \\fs tags, are made that much
+    smaller first, so the smaller words still end at `bottom`. None when no style could be changed.
+    Mid-frame lines (split layout, {\\an5}) keep their place."""
+    scale = scale if isinstance(scale, (int, float)) and 0.6 <= scale < 1.0 else None
     m = re.search(r"^PlayResY:\s*(\d+)", text, re.M)
     res_y = int(m.group(1)) if m and int(m.group(1)) > 0 else 288
-    fields, out, changed = ASS_STYLE_FIELDS, [], 0
+    fields, out, changed, smaller = ASS_STYLE_FIELDS, [], 0, set()
     for line in text.splitlines():
         low = line.lower()
         if low.startswith("format:") and "marginv" in low and "fontsize" in low:
@@ -214,12 +236,23 @@ def lift_ass(text, bottom, frame_h=1920):
                     raise ValueError
                 size = float(vals[fields.index("fontsize")])
                 if int(vals[fields.index("alignment")]) in (1, 2, 3):
+                    if scale:
+                        smaller.add(vals[fields.index("name")].strip().lstrip("*"))
+                        size *= scale
+                        vals[fields.index("fontsize")] = _fmt(size)
+                        for k in ("outline", "shadow"):
+                            if k in fields:
+                                vals[fields.index(k)] = _fmt(float(vals[fields.index(k)]) * scale)
                     margin = (frame_h - bottom) * res_y / frame_h - CAPTION_GAP * size
                     vals[fields.index("marginv")] = str(int(max(0, round(margin))))
                     line = line.split(":", 1)[0] + ":" + ",".join(vals)
                     changed += 1
             except ValueError:
                 pass
+        elif smaller and low.startswith("dialogue:"):
+            parts = line.split(":", 1)[1].split(",", 9)   # Layer, Start, End, Style, ...
+            if len(parts) == 10 and parts[3].strip().lstrip("*") in smaller:
+                line = scale_fs_tags(line, scale)
         out.append(line)
     return "\n".join(out) + "\n" if changed else None
 
@@ -275,13 +308,14 @@ def run_in_job(job_id, cmd, timeout=900):
         raise RuntimeError(((p.stderr or "").strip().splitlines() or [f"code {p.returncode}"])[-1][:200])
 
 
-def raise_captions(job_id, clip_file, bottom, n):
-    """Burn a finished clip again with its words ending at row `bottom`. Returns the new file's path
-    (inside the job folder; the caller deletes it with drop_raised). Raises when it can't be done."""
+def raise_captions(job_id, clip_file, bottom, n, scale=None):
+    """Burn a finished clip again with its words ending at row `bottom` (and `scale` times smaller when
+    given). Returns the new file's path (inside the job folder; the caller deletes it with drop_raised).
+    Raises when it can't be done."""
     job_dir = os.path.join(REPO, "output", job_id)
     base, sub, hook = job_parts(job_dir, clip_file)
     with open(os.path.join(job_dir, sub), encoding="utf-8", errors="replace") as fh:
-        lifted = lift_ass(fh.read(), bottom)
+        lifted = lift_ass(fh.read(), bottom, scale=scale)
     if not lifted:
         raise ValueError("the caption file has no bottom style to move")
     ass_name, out_name = f"_raised_{n}.ass", f"_raised_{n}.mp4"
@@ -704,6 +738,7 @@ def collect(api, status, source, display=None, game_key=None, big_key=None, reac
         order = pick_big_moments(order, clips, job_id, big_key, os.path.basename(name).replace("_", " "))
     order = order[:TOP_N]
     bottom = caption_bottom(reactor) if reactor else None
+    scale = caption_scale(reactor) if bottom else None
     folder = os.path.join(OUT_ROOT, safe_name(name))
     if os.path.exists(folder):
         folder += time.strftime(" %Y-%m-%d %H%M")
@@ -723,7 +758,7 @@ def collect(api, status, source, display=None, game_key=None, big_key=None, reac
             label, base = os.path.basename(name), src
             try:
                 if bottom:   # his box sits at the bottom: the words go just above it first
-                    base = raise_captions(job_id, clip_file, bottom, n)
+                    base = raise_captions(job_id, clip_file, bottom, n, scale)
                 added = reactor_render(reactor, base, dest, label)
             except Exception as e:
                 log(f"REACTOR: failed to move the words above him on clip {n}, kept the plain clip: "
