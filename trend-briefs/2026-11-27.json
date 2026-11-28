@@ -1,0 +1,64 @@
+{
+  "report": 6,
+  "date": "2026-11-27",
+  "generated_at": "2026-11-28T02:58:00Z",
+  "brief_url": "https://claude.ai/artifact/Rgsoo6L6GFFQZJ4FiHALvr",
+  "concerns": [
+    "#3 uses SZA's 'Living So Good', a commercial track: likely blocked on business accounts and may be muted on YouTube; use a library track there.",
+    "#1 must show the leash on the front harness ring; AI often gets straps wrong, so it is checked before approval.",
+    "#2 trend is small (70 creators) but new and made for AI faces; use a fictional face only."
+  ],
+  "ideas": [
+    {
+      "rank": 1,
+      "pick": true,
+      "niche": "Dogs",
+      "title": "Wordless leash-pulling fix",
+      "length": "10-12 s",
+      "why": "30x usual views, 11 accounts (Volume, Nov 27)",
+      "hook": "This helped so much with my dog pulling on walks.",
+      "caption": "Wish I knew this sooner. Save it for your next walk. #dogtraining #dogtips #dogsoftiktok #leashtraining",
+      "sound": "Calm happy track from app library (safe everywhere)",
+      "post_time": "Sat Nov 28, 8-10 AM Phoenix (weekend walk time; people save and try it right away)",
+      "build_plan": [
+        "AI visuals: lab pulling hard on a back-clip harness, 4 s",
+        "Close-up: clip moves to the front chest ring, 2 s",
+        "Same dog walking calmly, 4 s; text 'Front clip = no pulling.' No voice"
+      ]
+    },
+    {
+      "rank": 2,
+      "pick": false,
+      "niche": "Anti-aging",
+      "title": "Half-face: same person at 60, two lifestyles",
+      "length": "8-10 s",
+      "why": "New AI trend, 70 creators, Fresh (Virlo, Nov 27)",
+      "hook": "Same person. Same age. Different habits.",
+      "caption": "Which side are you building? #antiaging #longevity #healthyaging #over40",
+      "sound": "Soft dramatic piano from app library",
+      "post_time": "Sun Nov 29, 6-8 PM Phoenix (Sunday-night reset thinking)",
+      "build_plan": [
+        "AI visuals: fictional 60-year-old portrait split down the middle, slow push-in",
+        "Text labels: 'No sunscreen, 5 hrs sleep, no lifting' vs 'SPF daily, 8 hrs, lifts 3x/week'",
+        "AI voice: 'You're choosing which side right now.'"
+      ]
+    },
+    {
+      "rank": 3,
+      "pick": false,
+      "niche": "Success",
+      "title": "December affirmation, \"Living So Good\"",
+      "length": "10-15 s",
+      "why": "New, 94 creators, Fresh (Virlo, Nov 27)",
+      "hook": "December affirmations. Say them like they already happened.",
+      "caption": "Claim it for December. Save and read this every morning. #affirmations #success #mindset #december",
+      "sound": "\"Living So Good\" by SZA (likely blocked on business accounts, may be muted on YouTube)",
+      "post_time": "Tue Dec 1, 6-8 AM Phoenix (new-month morning)",
+      "build_plan": [
+        "AI visuals: 5 soft morning shots (coffee by window, clean desk, sunrise drive, dawn gym, signed contract), 2-3 s each",
+        "Text: one affirmation per shot",
+        "No voice; song on personal accounts, library track on business accounts"
+      ]
+    }
+  ]
+}
